@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model checkpoints (large binary) — but keep config.json per run
+ProstateCls/output/**/*.pth
+
+# SLURM logs (verbose, machine-specific)
+ProstateCls/logs/
+
+# GradCAM figures (68 images, ~28 MB total — ignore bulk, keep selected examples)
+ProstateCls/figures/*/gradcam/*.png
+!ProstateCls/figures/deeper_head/gradcam/gradcam_10043_1000043.png
+!ProstateCls/figures/deeper_head/gradcam/gradcam_10099_1000099.png
+
+
+# Claude internal instructions
+CLAUDE.md
