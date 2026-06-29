@@ -219,6 +219,19 @@ Grad-CAM backpropagates the gradient of the csPCa prediction score through the f
 |--------|--------------|
 | Weight Tiling (`focal_deep`) | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10043_1000043.png) |
 | Channel Adapter (`adapter_base`) | ![](ProstateCls/channel_adapter/figures/adapter_base/gradcam/gradcam_10043_1000043.png) |
+| Mask-Guided (`mask_small`) | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10043_1000043.png) |
+
+**Mask-Guided (`mask_small`) — 7 correctly detected csPCa patients (ROI-cropped view)**
+
+| Patient | Attention Map |
+|---------|--------------|
+| 10043_1000043 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10043_1000043.png) |
+| 10257_1000261 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10257_1000261.png) |
+| 10398_1000404 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10398_1000404.png) |
+| 10463_1000471 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10463_1000471.png) |
+| 10549_1000561 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10549_1000561.png) |
+| 10558_1000570 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10558_1000570.png) |
+| 10589_1000603 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10589_1000603.png) |
 
 ---
 
