@@ -214,3 +214,7 @@ The Slice Transformer is architecturally the most principled approach: each slic
 #### Class imbalance remains the dominant challenge
 
 Across all approaches, sensitivity is consistently more difficult to achieve than specificity. Even the best model (`focal_deep`) generates 13 false positives while missing only 1 true cancer. The small absolute number of csPCa patients in training (45) means that any single false negative in the training set has an outsized effect on gradient updates, making it difficult for the model to reliably learn the features of every cancer subtype present in the test set. Focal Loss and weighted sampling mitigate this but do not eliminate it.
+
+#### Future Work
+
+A more principled treatment of the multi-modal input would involve **late fusion** — encoding T2W, ADC, and gland mask through separate branches and combining the resulting feature vectors via concatenation or attention — or **cross-modal attention**, where features from one modality guide the processing of another (e.g., T2W spatial features serving as attention queries over the ADC map). Both approaches allow each modality to be encoded according to its own characteristics rather than being mixed at the input level. However, given the small dataset size in this work (451 patients, 45 csPCa in training), either architecture would introduce substantially more parameters that must be learned from scratch, making severe overfitting the expected outcome. These directions become viable as dataset scale increases.
