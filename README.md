@@ -138,6 +138,33 @@ The adapter learns to compress 96 channels into 3, producing a pseudo-RGB repres
 
 ---
 
+##### Method 4 · Mask-Guided Weight Tiling
+
+**Concept.** The gland segmentation mask is used as a spatial prior rather than as an image channel. Three changes are applied relative to the plain weight-tiling baseline:
+
+1. **Modality-specific normalization within the mask.** Instead of computing percentile statistics over the full image (which includes background tissue), T2W and ADC are each normalized using only pixels where the gland mask is active. This ensures the prostate tissue range — not the surrounding pelvis — defines the [0, 1] scale for each modality independently.
+
+2. **ROI crop.** The maximum projection of the gland mask across all slices is used to find the prostate bounding box. All three volumes (T2W, ADC, mask) are cropped to this region with a 16-pixel margin before resizing to 224×224. The model never sees irrelevant background anatomy.
+
+3. **Mask context branch.** A lightweight parallel branch explicitly encodes per-slice prostate coverage: the gland mask for each of the 32 slices is spatially averaged to produce a 32-dimensional coverage vector, which is projected to 64 dimensions and concatenated with the backbone's 1024-dimensional feature before the classification head.
+
+```
+[B, 96, 224, 224]  ← ROI-cropped; T2W·mask, ADC·mask, mask (mask-normalized)
+    ↓  Conv(96→64, 3×3)   ← weight tiling (same as Method 1)
+    ↓  MedViT backbone    ← pretrained, lr=1e-5
+[B, 1024]
+                                      [B, 32, 224, 224]  ← gland mask per slice
+                                           ↓  spatial avg pool
+                                      [B, 32] → Linear(32→64) → GELU
+                                      [B, 64]
+    ↓ concat
+[B, 1088] → MLP head → [B, 2]
+```
+
+**Key properties.** The gland mask now plays two distinct roles: it normalizes the MRI intensities to the prostate scale before the backbone sees anything, and it provides an explicit 3D spatial signal (coverage per slice) to the classification head. No additional pretrained parameters are required; the mask branch is small (≈2K parameters) and can be trained reliably from 45 positive examples.
+
+---
+
 #### 3.3 Shared Training Configuration
 
 | Setting | Value |
@@ -164,6 +191,8 @@ Test set: 68 patients (10 csPCa, 58 ciPCa). Metrics reported at threshold=0.5.
 | Weight Tiling | `baseline` (CE, head×1) | 0.898 | 0.90 | 0.76 | 0.545 | 9 | 14 | 44 | 1 |
 | Weight Tiling | `focal_base` (Focal Loss, MedViT-Base) | 0.822 | 0.80 | 0.83 | 0.571 | 8 | 10 | 48 | 2 |
 | Channel Adapter | `adapter_base` (CE, MedViT-Base) | 0.881 | 0.80 | 0.84 | 0.593 | 8 | 9 | 49 | 2 |
+| Mask-Guided | `mask_focal_deep` (Focal Loss, hd=2) | 0.841 | 0.40 | **0.88** | 0.381 | 4 | 7 | 51 | 6 |
+| Mask-Guided | `mask_small` (CE, hd=2) | 0.771 | 0.70 | 0.84 | 0.538 | 7 | 9 | 49 | 3 |
 | Slice Transformer | `slice_tf_small` (CE, CLS pooling) | 0.764 | 0.20 | 0.95 | 0.267 | 2 | 3 | 55 | 8 |
 
 #### Grad-CAM Attention Maps
@@ -206,6 +235,10 @@ The combination of Focal Loss and a two-layer MLP head (`focal_deep`) produced t
 The adapter approach achieves a competitive AUC of 0.881, but required the larger MedViT-Base backbone for stable training. The fundamental limitation is that a 1×1 convolution operates channel-wise without spatial context, making it intrinsically weaker than a 3×3 kernel at extracting spatial features across modalities. Additionally, the randomly initialized adapter generates noisy activations in early training, which small backbones cannot absorb — only the larger backbone's capacity allowed stable convergence.
 
 A deeper two-layer adapter (96→32→3) was also tested but performed worse: the additional parameters added more noise without improving the quality of the learned projection, suggesting that the bottleneck itself (not its depth) is the binding constraint.
+
+#### Mask-Guided approach improves specificity but not sensitivity
+
+The mask-guided approach achieves a test AUC of 0.841 (`mask_focal_deep`) — higher than the Slice Transformer and competitive with the Channel Adapter — while requiring no new pretrained weights and only ~2K additional parameters. The ROI crop and within-mask normalization remove irrelevant background signals that the plain weight-tiling model must learn to ignore. However, sensitivity remains the bottleneck: the best configuration detects only 4 of 10 cancers (0.40), suggesting that the mask-guided preprocessing and spatial context signal alone are insufficient to overcome the representation learning advantage of the weight-tiling baseline. The gland mask encodes *where* the prostate is, but not *which tissue patterns within the prostate* are suspicious — that discrimination still depends on the quality of the backbone features.
 
 #### Slice Transformer overfits under data scarcity
 
