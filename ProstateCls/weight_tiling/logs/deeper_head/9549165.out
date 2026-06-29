@@ -1,0 +1,108 @@
+Job ID: 9549165
+Node:   g7
+GPU:    0
+Run:    deeper_head
+Start:  Sun Jun 28 13:47:32 EDT 2026
+Device: cuda
+Parsed 32 epochs  |  Best val AUC: 0.8241 @ ep12
+Saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/figures/deeper_head/learning_curve.png
+Val:  68  (csPCa=10)
+Test: 68 (csPCa=10)
+initialize_weights...
+[model] First conv inflated: 3 → 96 channels (weight tiling ÷32)
+[model] proj_head: 1024 → 512 → 256 → 2  (dropout=0.2)
+Loaded: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/output/deeper_head/best.pth  (best ep=12)
+Running val inference...
+Running test inference...
+Val AUC: 0.8241  |  Test AUC: 0.8983
+Saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/figures/deeper_head/roc_curve.png
+Saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/figures/deeper_head/confusion_matrix.png
+=== 9549157 ===
+Best val AUC: 0.8241 @ epoch 12
+Test AUC:     0.8983
+
+ Threshold  Sensitivity  Specificity  Precision       F1   TP   FP   TN   FN
+---------------------------------------------------------------------------
+      0.20       0.9000       0.7931     0.4286   0.5806    9   12   46    1
+      0.30       0.9000       0.8103     0.4500   0.6000    9   11   47    1
+      0.40       0.9000       0.8103     0.4500   0.6000    9   11   47    1
+      0.50       0.9000       0.8276     0.4737   0.6207    9   10   48    1
+      0.60       0.9000       0.8448     0.5000   0.6429    9    9   49    1
+      0.70       0.9000       0.8448     0.5000   0.6429    9    9   49    1
+      0.77       0.8000       0.8621     0.5000   0.6154    8    8   50    2 ← Youden
+
+Per-patient predictions (test set):
+  PatientID            Label      Prob   Pred@0.5  Correct
+  10226_1000230        ciPCa     0.000      ciPCa       OK
+  10524_1000534        ciPCa     0.958      csPCa    WRONG
+  10099_1000099        ciPCa     0.000      ciPCa       OK
+  10073_1000073        ciPCa     0.000      ciPCa       OK
+  10378_1000384        ciPCa     0.597      csPCa    WRONG
+  10082_1000082        ciPCa     0.000      ciPCa       OK
+  10351_1000357        ciPCa     0.000      ciPCa       OK
+  10210_1000214        ciPCa     0.000      ciPCa       OK
+  10398_1000404        csPCa     0.992      csPCa       OK
+  10407_1000414        ciPCa     0.005      ciPCa       OK
+  10043_1000043        csPCa     0.999      csPCa       OK
+  10449_1000457        ciPCa     0.003      ciPCa       OK
+  10388_1000394        ciPCa     0.000      ciPCa       OK
+  10071_1000071        ciPCa     0.000      ciPCa       OK
+  10589_1000603        csPCa     0.991      csPCa       OK
+  10574_1000586        ciPCa     0.711      csPCa    WRONG
+  10454_1000462        ciPCa     0.162      ciPCa       OK
+  10469_1000477        ciPCa     0.000      ciPCa       OK
+  10207_1000211        ciPCa     0.000      ciPCa       OK
+  10467_1000475        ciPCa     0.000      ciPCa       OK
+  10136_1000138        ciPCa     0.000      ciPCa       OK
+  10076_1000076        ciPCa     0.000      ciPCa       OK
+  10489_1000497        ciPCa     0.000      ciPCa       OK
+  10335_1000341        ciPCa     0.996      csPCa    WRONG
+  10366_1000372        ciPCa     0.986      csPCa    WRONG
+  10242_1000246        ciPCa     0.000      ciPCa       OK
+  10543_1000554        ciPCa     0.000      ciPCa       OK
+  10269_1000273        ciPCa     0.000      ciPCa       OK
+  10031_1000031        ciPCa     0.000      ciPCa       OK
+  10257_1000261        csPCa     0.972      csPCa       OK
+  10430_1000438        ciPCa     0.000      ciPCa       OK
+  10185_1000188        ciPCa     0.841      csPCa    WRONG
+  10130_1000131        ciPCa     0.000      ciPCa       OK
+  10175_1000178        ciPCa     0.000      ciPCa       OK
+  10267_1000271        ciPCa     0.428      ciPCa       OK
+  10153_1000156        ciPCa     0.000      ciPCa       OK
+  10530_1000540        ciPCa     0.989      csPCa    WRONG
+  10521_1000531        ciPCa     0.000      ciPCa       OK
+  10475_1000483        ciPCa     0.000      ciPCa       OK
+  10150_1000152        ciPCa     0.000      ciPCa       OK
+  10386_1000392        ciPCa     0.000      ciPCa       OK
+  10348_1000354        ciPCa     0.005      ciPCa       OK
+  10539_1000549        csPCa     0.000      ciPCa    WRONG
+  10592_1000606        ciPCa     0.000      ciPCa       OK
+  10146_1000148        ciPCa     0.110      ciPCa       OK
+  10054_1000054        ciPCa     0.000      ciPCa       OK
+  10590_1000604        ciPCa     0.000      ciPCa       OK
+  10549_1000561        csPCa     0.967      csPCa       OK
+  10270_1000274        ciPCa     0.003      ciPCa       OK
+  10069_1000069        ciPCa     0.987      csPCa    WRONG
+  10463_1000471        csPCa     0.992      csPCa       OK
+  10581_1000595        ciPCa     0.860      csPCa    WRONG
+  10251_1000255        ciPCa     0.000      ciPCa       OK
+  10558_1000570        csPCa     0.783      csPCa       OK
+  10192_1000195        ciPCa     0.000      ciPCa       OK
+  10030_1000030        ciPCa     0.000      ciPCa       OK
+  10411_1000418        ciPCa     0.000      ciPCa       OK
+  10305_1000311        ciPCa     0.000      ciPCa       OK
+  10022_1000022        ciPCa     0.231      ciPCa       OK
+  10292_1000298        ciPCa     0.000      ciPCa       OK
+  10273_1000277        ciPCa     0.000      ciPCa       OK
+  10246_1000250        ciPCa     0.000      ciPCa       OK
+  10569_1000581        ciPCa     0.833      csPCa    WRONG
+  10486_1000494        csPCa     0.766      csPCa       OK
+  10491_1000500        ciPCa     0.000      ciPCa       OK
+  10568_1000580        csPCa     0.996      csPCa       OK
+  10404_1000410        ciPCa     0.000      ciPCa       OK
+  10129_1000130        ciPCa     0.000      ciPCa       OK
+Saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/figures/deeper_head/performance_table.txt
+Grad-CAM saved to /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/figures/deeper_head/gradcam/
+
+Done.
+End: Sun Jun 28 13:49:35 EDT 2026

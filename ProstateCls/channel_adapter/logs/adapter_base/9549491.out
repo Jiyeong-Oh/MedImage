@@ -1,0 +1,111 @@
+Job ID: 9549491
+Node:   g8
+GPU:    0
+Run:    adapter_base
+Start:  Sun Jun 28 18:36:40 EDT 2026
+Device: cuda
+Parsed 27 epochs  |  Best val AUC: 0.7879 @ ep7
+Saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/channel_adapter/figures/adapter_base/learning_curve.png
+Val:  68  (csPCa=10)
+Test: 68 (csPCa=10)
+initialize_weights...
+[model] Channel adapter: 96 → 3 → 64 (learnable 1×1 + pretrained 3×3)
+[model] backbone: MedViT_base  proj_head: 1024 → 512 → 256 → 2  (dropout=0.2)
+Loaded: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/channel_adapter/output/adapter_base/best.pth  (best ep=7)
+Running val inference...
+Running test inference...
+Val  AUC=0.7879  AP=0.4013
+Test AUC=0.8810  AP=0.5157
+Saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/channel_adapter/figures/adapter_base/roc_pr_curve.png
+Saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/channel_adapter/figures/adapter_base/confusion_matrix.png
+=== 9549479 ===
+Best val AUC: 0.7879 @ epoch 7
+Val  AP:      0.4013
+Test AUC:     0.8810
+Test AP:      0.5157
+
+ Threshold  Sensitivity  Specificity  Precision       F1   TP   FP   TN   FN
+---------------------------------------------------------------------------
+      0.17       0.9000       0.7586     0.3913   0.5455    9   14   44    1 ← Youden
+      0.20       0.9000       0.7586     0.3913   0.5455    9   14   44    1
+      0.30       0.8000       0.7759     0.3810   0.5161    8   13   45    2
+      0.40       0.8000       0.7931     0.4000   0.5333    8   12   46    2
+      0.50       0.8000       0.8448     0.4706   0.5926    8    9   49    2
+      0.60       0.7000       0.8448     0.4375   0.5385    7    9   49    3
+      0.70       0.6000       0.8966     0.5000   0.5455    6    6   52    4
+
+Per-patient predictions (test set):
+  PatientID            Label      Prob   Pred@0.5  Correct
+  10226_1000230        ciPCa     0.058      ciPCa       OK
+  10524_1000534        ciPCa     0.685      csPCa    WRONG
+  10099_1000099        ciPCa     0.024      ciPCa       OK
+  10073_1000073        ciPCa     0.025      ciPCa       OK
+  10378_1000384        ciPCa     0.153      ciPCa       OK
+  10082_1000082        ciPCa     0.217      ciPCa       OK
+  10351_1000357        ciPCa     0.410      ciPCa       OK
+  10210_1000214        ciPCa     0.016      ciPCa       OK
+  10398_1000404        csPCa     0.216      ciPCa    WRONG
+  10407_1000414        ciPCa     0.112      ciPCa       OK
+  10043_1000043        csPCa     0.753      csPCa       OK
+  10449_1000457        ciPCa     0.069      ciPCa       OK
+  10388_1000394        ciPCa     0.047      ciPCa       OK
+  10071_1000071        ciPCa     0.139      ciPCa       OK
+  10589_1000603        csPCa     0.974      csPCa       OK
+  10574_1000586        ciPCa     0.098      ciPCa       OK
+  10454_1000462        ciPCa     0.648      csPCa    WRONG
+  10469_1000477        ciPCa     0.114      ciPCa       OK
+  10207_1000211        ciPCa     0.085      ciPCa       OK
+  10467_1000475        ciPCa     0.031      ciPCa       OK
+  10136_1000138        ciPCa     0.351      ciPCa       OK
+  10076_1000076        ciPCa     0.800      csPCa    WRONG
+  10489_1000497        ciPCa     0.068      ciPCa       OK
+  10335_1000341        ciPCa     0.427      ciPCa       OK
+  10366_1000372        ciPCa     0.473      ciPCa       OK
+  10242_1000246        ciPCa     0.048      ciPCa       OK
+  10543_1000554        ciPCa     0.060      ciPCa       OK
+  10269_1000273        ciPCa     0.055      ciPCa       OK
+  10031_1000031        ciPCa     0.076      ciPCa       OK
+  10257_1000261        csPCa     0.953      csPCa       OK
+  10430_1000438        ciPCa     0.078      ciPCa       OK
+  10185_1000188        ciPCa     0.163      ciPCa       OK
+  10130_1000131        ciPCa     0.163      ciPCa       OK
+  10175_1000178        ciPCa     0.026      ciPCa       OK
+  10267_1000271        ciPCa     0.924      csPCa    WRONG
+  10153_1000156        ciPCa     0.019      ciPCa       OK
+  10530_1000540        ciPCa     0.921      csPCa    WRONG
+  10521_1000531        ciPCa     0.047      ciPCa       OK
+  10475_1000483        ciPCa     0.012      ciPCa       OK
+  10150_1000152        ciPCa     0.035      ciPCa       OK
+  10386_1000392        ciPCa     0.160      ciPCa       OK
+  10348_1000354        ciPCa     0.022      ciPCa       OK
+  10539_1000549        csPCa     0.169      ciPCa    WRONG
+  10592_1000606        ciPCa     0.065      ciPCa       OK
+  10146_1000148        ciPCa     0.065      ciPCa       OK
+  10054_1000054        ciPCa     0.087      ciPCa       OK
+  10590_1000604        ciPCa     0.011      ciPCa       OK
+  10549_1000561        csPCa     0.866      csPCa       OK
+  10270_1000274        ciPCa     0.056      ciPCa       OK
+  10069_1000069        ciPCa     0.066      ciPCa       OK
+  10463_1000471        csPCa     0.742      csPCa       OK
+  10581_1000595        ciPCa     0.965      csPCa    WRONG
+  10251_1000255        ciPCa     0.027      ciPCa       OK
+  10558_1000570        csPCa     0.522      csPCa       OK
+  10192_1000195        ciPCa     0.053      ciPCa       OK
+  10030_1000030        ciPCa     0.086      ciPCa       OK
+  10411_1000418        ciPCa     0.025      ciPCa       OK
+  10305_1000311        ciPCa     0.155      ciPCa       OK
+  10022_1000022        ciPCa     0.943      csPCa    WRONG
+  10292_1000298        ciPCa     0.014      ciPCa       OK
+  10273_1000277        ciPCa     0.091      ciPCa       OK
+  10246_1000250        ciPCa     0.093      ciPCa       OK
+  10569_1000581        ciPCa     0.912      csPCa    WRONG
+  10486_1000494        csPCa     0.908      csPCa       OK
+  10491_1000500        ciPCa     0.116      ciPCa       OK
+  10568_1000580        csPCa     0.608      csPCa       OK
+  10404_1000410        ciPCa     0.627      csPCa    WRONG
+  10129_1000130        ciPCa     0.024      ciPCa       OK
+Saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/channel_adapter/figures/adapter_base/performance_table.txt
+Grad-CAM saved to /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/channel_adapter/figures/adapter_base/gradcam/
+
+Done.
+End: Sun Jun 28 18:38:44 EDT 2026

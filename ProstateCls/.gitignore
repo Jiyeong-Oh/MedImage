@@ -1,0 +1,4 @@
+# Model checkpoints (too large for GitHub)
+output/
+**/__pycache__/
+*.pyc

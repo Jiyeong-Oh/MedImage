@@ -1,0 +1,6 @@
+Job ID: 9550841
+Node:   g7
+GPU:    0
+Run:    focal_deep_rlrop
+Extra:  --focal-gamma 2.0 --head-depth 2
+Start:  Sun Jun 28 21:11:06 EDT 2026
