@@ -23,3 +23,5 @@ ProstateCls/figures/*/gradcam/*.png
 
 # Claude internal instructions
 CLAUDE.md
+
+.claude/

@@ -1,251 +1,161 @@
 # PI-CAI Prostate Cancer Classification
 
-Binary classification of prostate MRI studies using MedViT with depth-as-channel encoding.
+Binary classification of prostate MRI studies: **csPCa** (clinically significant, label 1) vs. **ciPCa** (clinically insignificant, label 0).
 
-| Class | Label | Patients | Ratio |
-|-------|-------|----------|-------|
-| **csPCa** — clinically significant | 1 | 65 | 14.4 % |
-| **ciPCa** — clinically insignificant | 0 | 386 | 85.6 % |
-| **Total** | | **451** | |
+MedViT is pretrained on ImageNet and expects a 3-channel RGB input. This project compares three strategies for adapting it to 96-channel prostate MRI input (32 axial slices × 3 modalities: T2W, ADC, gland mask).
 
 ---
 
 ## Dataset
 
-| Item | Path |
-|------|------|
-| Processed volumes | `/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered/` |
-| Label CSV | `/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered.csv` |
-| MedViT pretrained weights | `/N/slate/ohjiye/medvit_ckpt/MedViT_small.pth` |
-| Virtual environment | `/N/slate/ohjiye/envs/medvit/bin/python3` |
-
-> **Excluded patients** (4): `10188_1000191` (ADC CRC error), `10448_1000456`, `10559_1000571`, `10593_1000607` (extraction / T2W missing)
-
-### Data structure
-
-```
-PI-CAI_reg_processed_filtered/<patientID>/
-  <patientID>_t2w.nii.gz        # T2-weighted MRI (3D)
-  <patientID>_adc_reg.nii.gz    # ADC map (co-registered to T2W)
-  <patientID>_gland.nii.gz      # Prostate gland segmentation mask
-  <patientID>_tumor.nii.gz      # Tumor mask (not used)
-```
-
-Normalization: per-volume 1–99th percentile clipping → [0, 1].
+| | |
+|---|---|
+| Source | PI-CAI challenge, registered & preprocessed |
+| Patients | 451 total — csPCa: 65 (14.4%), ciPCa: 386 (85.6%) |
+| Input | `[B, 96, 224, 224]` — channel order: `[T2W₀, ADC₀, gland₀, T2W₁, ...]` |
+| Split (seed=42) | Train 315 / Val 68 / Test 68, stratified |
+| Class imbalance | WeightedRandomSampler + weighted CE loss (ciPCa 0.583 : csPCa 3.500) |
 
 ---
 
-## Model Architecture
+## Methods
 
-**MedViT_small** backbone with a **depth-as-channel** input strategy.
+### Method 1 · Weight Tiling
 
-### Input encoding
-
-All 32 axial slices × 3 modalities are stacked into a single 2-D tensor, enabling one patient = one forward pass:
+Pretrained first conv weights `[64, 3, 3, 3]` are tiled 32× along the channel dimension and divided by 32 to initialize a new `Conv2d(96→64, 3×3)`. The backbone otherwise remains intact.
 
 ```
-[B, 96, 224, 224]   ←   32 slices × (T2W, ADC, gland mask)
-Channel order (interleaved): [T2W₀, ADC₀, gland₀, T2W₁, ADC₁, gland₁, …, gland₃₁]
+[B, 96, 224, 224]
+    ↓  Conv(96→64, 3×3)  ← pretrained weights tiled 32×, fine-tuned at lr=3e-4
+    ↓  MedViT backbone   ← pretrained, fine-tuned at lr=1e-5
+[B, 1024] → MLP head → [B, 2]
 ```
 
-### Pretrained weight inflation
-
-Only the first Conv layer is widened (3 ch → 96 ch); all other backbone weights are loaded from the ImageNet-pretrained checkpoint unchanged.
-
-```
-Pretrained:  [64,  3, 3, 3]
-Inflated:    [64, 96, 3, 3]   ←  pretrained weight tiled 32×, then ÷ 32
-```
-
-Summing 96-channel responses at initialisation equals summing 3-channel responses → backbone behaviour is preserved.
-
-### Classification head (`deeper_head`, current best)
-
-```
-MedViT backbone → [B, 1024]
-  Linear(1024 → 512) → GELU → Dropout(0.2)
-  Linear( 512 → 256) → GELU → Dropout(0.2)
-  Linear( 256 →   2)
-```
-
-### Training settings
-
-| Parameter | Value |
-|-----------|-------|
-| Optimizer | AdamW |
-| Backbone LR | 1e-5 (slow — prevents BN drift) |
-| Head LR | 3e-4 (fast — new layers) |
-| Weight decay | 1e-4 |
-| Scheduler | CosineAnnealingLR (T_max = 150, η_min = 1e-7) |
-| Batch size | 8 patients |
-| Loss | CrossEntropyLoss(weight = [0.583, 3.500]) — ciPCa : csPCa = 1 : 6 |
-| Sampler | WeightedRandomSampler (class-balanced oversampling) |
-| Gradient clipping | max_norm = 1.0 |
-| Early stopping | patience = 20 epochs on val AUC |
-
-### Data split (seed = 42, stratified)
-
-| Split | Patients | csPCa | ciPCa |
-|-------|----------|-------|-------|
-| Train | 315 | 45 | 270 |
-| Val | 68 | 10 | 58 |
-| Test | 68 | 10 | 58 |
+The 3×3 kernel learns cross-channel spatial patterns from the first epoch, with pretrained spatial priors intact. No new parameters beyond the inflated conv.
 
 ---
 
-## Experiment Results
+### Method 2 · Channel Adapter
 
-### Summary
-
-| Run | Head | Val AUC (best ep) | Test AUC | Sensitivity | Specificity | F1 (csPCa) |
-|-----|------|:-----------------:|:--------:|:-----------:|:-----------:|:----------:|
-| baseline | 1024 → 256 → 2  (Dropout 0.4) | 0.8190 (ep 17 / 37) | 0.8983 | **0.9000** | 0.7586 | 0.546 |
-| **deeper_head** | 1024 → 512 → 256 → 2  (Dropout 0.2) | 0.8241 (ep 12 / 32) | **0.8983** | **0.9000** | **0.8276** | **0.621** |
-
-> Test set: 68 patients (10 csPCa, 58 ciPCa). Metrics at threshold = 0.5.  
-> Both runs: lr_head = 3e-4, batch = 8, T_max = 150.
-
-**Key takeaway**: The deeper head (3-layer MLP, Dropout 0.2) achieves the same AUC and sensitivity as the shallow baseline while reducing false positives from 14 → 10 (Specificity +7 pp, F1 +0.075). The single 1024 → 256 projection of the baseline creates an information bottleneck that hurts precision.
-
----
-
-### Learning Curves
-
-<table>
-<tr>
-<th>baseline</th>
-<th>deeper_head</th>
-</tr>
-<tr>
-<td><img src="ProstateCls/figures/baseline/learning_curve.png" width="420"></td>
-<td><img src="ProstateCls/figures/deeper_head/learning_curve.png" width="420"></td>
-</tr>
-</table>
-
-Both runs peak within the first 10–17 epochs and then degrade as the model overfits the small training set (315 patients, 45 csPCa). Early stopping at patience = 20 halts training before further degradation.
-
----
-
-### ROC Curve
-
-<img src="ProstateCls/figures/deeper_head/roc_curve.png" width="520">
-
-> Youden-optimal threshold (deeper_head): **0.77** → Sensitivity 0.80, Specificity 0.86.  
-> At the default threshold 0.50 the model prioritises recall: Sensitivity 0.90, Specificity 0.83.
-
----
-
-### Confusion Matrix
-
-<table>
-<tr>
-<th>baseline  (thr = 0.5)</th>
-<th>deeper_head  (thr = 0.5)</th>
-</tr>
-<tr>
-<td><img src="ProstateCls/figures/baseline/confusion_matrix.png" width="340"></td>
-<td><img src="ProstateCls/figures/deeper_head/confusion_matrix.png" width="340"></td>
-</tr>
-</table>
-
-The deeper head reduces false positives (ciPCa → csPCa) from 14 to 10 while keeping the true positive count identical (9 / 10 csPCa detected).
-
----
-
-### Grad-CAM Attention Maps
-
-Grad-CAM applied to the last convolutional block of MedViT. Each row shows: **T2W slice (center)** · **Grad-CAM heatmap** · **overlay**.
-
-#### Correct csPCa — patient `10043_1000043`  (P(csPCa) = 0.999)
-
-<img src="ProstateCls/figures/deeper_head/gradcam/gradcam_10043_1000043.png" width="720">
-
-The model attends strongly to the peripheral zone, consistent with the typical anatomical location of clinically significant prostate cancer.
-
-#### Correct ciPCa — patient `10099_1000099`  (P(csPCa) = 0.000)
-
-<img src="ProstateCls/figures/deeper_head/gradcam/gradcam_10099_1000099.png" width="720">
-
-Uniformly low activation throughout the gland reflects the model's confident benign prediction.
-
----
-
-### Per-threshold Performance (deeper_head, test set)
+A learnable `1×1 Conv(96→3)` is inserted before the original pretrained first conv, which is left completely unchanged.
 
 ```
-Threshold  Sensitivity  Specificity  Precision       F1   TP   FP   TN   FN
----------------------------------------------------------------------------
-     0.20       0.9000       0.7931     0.4286   0.5806    9   12   46    1
-     0.30       0.9000       0.8103     0.4500   0.6000    9   11   47    1
-     0.40       0.9000       0.8103     0.4500   0.6000    9   11   47    1
-     0.50       0.9000       0.8276     0.4737   0.6207    9   10   48    1
-     0.60       0.9000       0.8448     0.5000   0.6429    9    9   49    1
-     0.70       0.9000       0.8448     0.5000   0.6429    9    9   49    1
-     0.77       0.8000       0.8621     0.5000   0.6154    8    8   50    2  ← Youden
+[B, 96, 224, 224]
+    ↓  Conv(96→3, 1×1)   ← randomly initialized, lr=1e-4
+    ↓  Conv(3→64, 3×3)   ← pretrained, untouched, lr=1e-5
+    ↓  MedViT backbone   ← pretrained, lr=1e-5
+[B, 1024] → MLP head → [B, 2]
 ```
 
----
+The adapter learns a linear channel projection; the pretrained conv processes the output as if it were a 3-channel image. Three separate LR groups (backbone / adapter / head) prevent the randomly initialized adapter from destabilizing pretrained weights.
 
-## Ongoing Experiments
-
-| Run | Change from deeper_head | Hypothesis |
-|-----|------------------------|-----------|
-| aug_strong | Stronger augmentation (rotation ±25°, translate ±12%, noise ↑, gamma 0.75–1.40) | Reduce early overfitting from limited data |
-| pw5 | csPCa CrossEntropyLoss weight 3.5 → 5.0 | Increase recall / F1 by penalising false negatives more heavily |
+> Small backbone (MedViT_small) consistently collapsed with a random adapter — noisy initial activations overwhelmed the limited capacity. MedViT_base (3× more parameters) proved robust.
 
 ---
 
-## Pipeline
+### Method 3 · Slice Transformer
+
+Each of the 32 slices is processed independently through the pretrained MedViT backbone (3-channel input unchanged). The 32 resulting feature vectors are aggregated by a Transformer encoder.
+
+```
+[B, 96, 224, 224]
+    ↓  reshape → [B, 32, 3, 224, 224]
+    ↓  MedViT backbone (shared, 3ch, lr=1e-5)   ← processed per patient to avoid OOM
+[B, 32, 1024]
+    ↓  + CLS token + positional embedding
+    ↓  Transformer Encoder (2 layers, 8 heads)   ← lr=3e-4
+    ↓  CLS output
+[B, 1024] → MLP head → [B, 2]
+```
+
+The pretrained first conv is used exactly as designed — no modification. The Transformer captures inter-slice relationships. **Memory note**: processing `B×32` images simultaneously causes OOM; fixed by a per-patient loop (peak memory = 32 images regardless of batch size).
+
+---
+
+## Training
+
+| Hyperparameter | Value |
+|---|---|
+| Backbone LR | 1e-5 |
+| Head / new layers LR | 3e-4 |
+| Scheduler | ReduceLROnPlateau (factor=0.5, patience=10 epochs) |
+| Early stopping | patience=30 (resets after each LR drop) |
+| Loss | CrossEntropyLoss (weighted) or FocalLoss (γ=2) |
+| Optimizer | AdamW, weight_decay=1e-4 |
+| Grad clip | max_norm=1.0 |
+
+**ReduceLROnPlateau**: LR halves whenever val AUC fails to improve for 10 consecutive epochs. Early stopping patience resets after each LR reduction, giving the model a fresh chance at each new LR level.
+
+---
+
+## Results
+
+Test set: 68 patients (10 csPCa, 58 ciPCa). Metrics at threshold=0.5.
+
+| Method | Run | Test AUC | Sensitivity | Specificity | F1 | TP | FP | TN | FN |
+|--------|-----|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Weight Tiling | `focal_deep` | **0.919** | **0.90** | 0.78 | 0.563 | 9 | 13 | 45 | 1 |
+| Weight Tiling | `base_ce` | 0.907 | 0.80 | **0.90** | **0.667** | 8 | 6 | 52 | 2 |
+| Weight Tiling | `deeper_head` | 0.898 | 0.90 | 0.83 | 0.621 | 9 | 10 | 48 | 1 |
+| Weight Tiling | `baseline` | 0.898 | 0.90 | 0.76 | 0.545 | 9 | 14 | 44 | 1 |
+| Weight Tiling | `focal_base` | 0.822 | 0.80 | 0.83 | 0.571 | 8 | 10 | 48 | 2 |
+| Channel Adapter | `adapter_base` | 0.881 | 0.80 | 0.84 | 0.593 | 8 | 9 | 49 | 2 |
+| Slice Transformer | `slice_tf_small` | 0.764 | 0.20 | 0.95 | 0.267 | 2 | 3 | 55 | 8 |
+
+**Weight Tiling dominates.** The inflated 3×3 conv retains spatial priors and requires no additional parameters beyond the channel dimension change. `focal_deep` achieves the highest AUC (0.919) and sensitivity (0.90, misses 1 of 10 cancers), preferred clinically. `base_ce` produces the fewest false positives (6 FP) for the best F1.
+
+**Channel Adapter** is viable but requires a larger backbone for stability, and the 1×1 adapter cannot capture spatial cross-channel patterns the way a 3×3 inflated conv can.
+
+**Slice Transformer** overfits despite the elegant design — the Transformer encoder (~6M new params) cannot be reliably trained on 45 positive examples. Val AUC peaked at 0.824 but test AUC was only 0.764, with sensitivity collapsing to 0.20.
+
+---
+
+## Grad-CAM
+
+Grad-CAM highlights spatial regions driving the csPCa prediction (T2W center slice). Each row: **T2W** | **heatmap** | **overlay**.
+
+### focal_deep — Correctly predicted csPCa patients (TP: 9/10)
+
+| Patient | Grad-CAM |
+|---------|----------|
+| 10043_1000043 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10043_1000043.png) |
+| 10257_1000261 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10257_1000261.png) |
+| 10398_1000404 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10398_1000404.png) |
+| 10463_1000471 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10463_1000471.png) |
+| 10486_1000494 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10486_1000494.png) |
+| 10549_1000561 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10549_1000561.png) |
+| 10558_1000570 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10558_1000570.png) |
+| 10568_1000580 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10568_1000580.png) |
+| 10589_1000603 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10589_1000603.png) |
+
+### Method comparison — Patient 10043_1000043 (TP in all methods)
+
+| Method | Grad-CAM |
+|--------|----------|
+| Weight Tiling (`focal_deep`) | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10043_1000043.png) |
+| Channel Adapter (`adapter_base`) | ![](ProstateCls/channel_adapter/figures/adapter_base/gradcam/gradcam_10043_1000043.png) |
+
+---
+
+## Reproducing
 
 ```bash
-cd /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls
+cd ProstateCls/
 
-# Train
-bash 0_submit.sh <run-name>
+# Weight Tiling
+cd weight_tiling
+bash 0_submit.sh focal_deep "--focal-gamma 2.0 --head-depth 2"
+bash 0_submit.sh base_ce    "--backbone base"
+bash 1_submit_vis.sh focal_deep
 
-# Train with experiment flags
-bash 0_submit.sh aug_strong "--aug-strong"
-bash 0_submit.sh pw5        "--cspca-weight 5.0"
+# Channel Adapter
+cd ../channel_adapter
+bash 0_submit.sh adapter_base   # default: backbone=base
 
-# Visualise (auto-detects latest run if no arg given)
-bash 1_submit_vis.sh <run-name>
+# Slice Transformer
+cd ../slice_transformer
+bash 0_submit.sh slice_tf_small
+bash 0_submit.sh slice_tf_mean "--pooling mean"
 ```
 
-### Outputs per run
-
-| Path | Contents |
-|------|---------|
-| `logs/<name>/<jobid>.out` | SLURM stdout — epoch log, final test metrics |
-| `output/<name>/best.pth` | Best checkpoint (val AUC) |
-| `output/<name>/config.json` | Full experiment config: hyperparams, model structure, SLURM job ID |
-| `figures/<name>/learning_curve.png` | Train loss + val AUC over epochs |
-| `figures/<name>/roc_pr_curve.png` | ROC + Precision-Recall curves (val & test) |
-| `figures/<name>/confusion_matrix.png` | Confusion matrix at threshold 0.5 |
-| `figures/<name>/performance_table.txt` | Multi-threshold metrics + per-patient predictions |
-| `figures/<name>/gradcam/` | Grad-CAM overlays for all test patients |
-
----
-
-## Code Structure
-
-| File | Description |
-|------|-------------|
-| `ProstateCls/dataset.py` | `PatientVolumeDataset`: load → normalise → stack → `[96, 224, 224]`. Standard and strong augmentation modes. |
-| `ProstateCls/model.py` | `build_model()`: weight-inflated MedViT_small + 3-layer MLP head |
-| `ProstateCls/train.py` | Differential LR training, weighted sampling, early stopping, config save |
-| `ProstateCls/visualize.py` | Learning curve, ROC+PR curve, confusion matrix, Grad-CAM |
-| `ProstateCls/0_submit.sh` | SLURM launcher — `bash 0_submit.sh <name> [extra-args]` |
-| `ProstateCls/1_submit_vis.sh` | Visualisation launcher |
-
----
-
-## Environment
-
-- **HPC**: IU Quartz, partition `gpu` (V100), account `r02144`
-- **Python env**: `/N/slate/ohjiye/envs/medvit/bin/python3`
-- **Key packages**: PyTorch, nibabel, scikit-learn, timm, einops
-
-```bash
-squeue -u $USER      # check running jobs
-scancel <jobid>      # cancel a job
-```
+Python: `/N/slate/ohjiye/envs/medvit/bin/python3`
