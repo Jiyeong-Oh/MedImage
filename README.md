@@ -20,15 +20,6 @@ Two fundamental challenges arise when applying a pretrained Vision Transformer (
 
 The PI-CAI (Prostate Imaging: Cancer AI) dataset provides multi-parametric prostate MRI studies with pathology-confirmed labels. The full dataset contains approximately 1,000 patient studies. After filtering for complete data (T2W, ADC, and gland mask all available) and removing studies with known acquisition or registration errors, **451 patients** were retained for this work.
 
-Four patients were explicitly excluded:
-
-| Patient ID | Reason |
-|------------|--------|
-| 10188_1000191 | ADC cyclic redundancy check error |
-| 10448_1000456 | Extraction error |
-| 10559_1000571 | Extraction error |
-| 10593_1000607 | T2W image missing |
-
 ### Class Distribution
 
 | Class | Label | Count | Proportion |
