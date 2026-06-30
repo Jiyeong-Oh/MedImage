@@ -32,13 +32,38 @@ from model import build_model
 DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
 
 
-def load_tumor_slice(pid, center_z, target_size=224):
-    path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
-    if not os.path.exists(path):
+def get_best_display_slice(pid, n_slices=32):
+    """Return (tensor_idx, volume_z) for the z with the most tumor area within the sampled range."""
+    t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
+    tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
+    D     = nib.load(t2w_path).shape[2]
+    start = (D - n_slices) // 2 if D >= n_slices else 0
+    n_eff = min(n_slices, D)
+    fallback_ti = n_slices // 2
+    fallback_vz = start + fallback_ti
+    if not os.path.exists(tumor_path):
+        return fallback_ti, fallback_vz
+    tumor_vol = nib.load(tumor_path).get_fdata()
+    areas = np.array([tumor_vol[:, :, start + i].sum() for i in range(n_eff)])
+    if areas.max() > 0:
+        best = int(areas.argmax())
+        return best, start + best
+    return fallback_ti, fallback_vz
+
+
+def load_tumor_slice(pid, volume_z, target_size=224):
+    """Load tumor mask at volume_z, apply same ROI crop as MaskGuidedDataset, resize to target_size."""
+    tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
+    gland_path = os.path.join(DATA_ROOT, pid, f'{pid}_gland.nii.gz')
+    if not os.path.exists(tumor_path):
         return np.zeros((target_size, target_size), dtype=np.float32)
-    vol = nib.load(path).get_fdata()
-    z   = min(center_z, vol.shape[2] - 1)
-    sl  = vol[:, :, z].astype(np.float32)
+    tumor_vol = nib.load(tumor_path).get_fdata()
+    gland_vol = nib.load(gland_path).get_fdata().astype(np.float32)
+    gland_vol = (gland_vol > 0.5).astype(np.float32)
+    from dataset import get_roi_bbox
+    y0, y1, x0, x1 = get_roi_bbox(gland_vol, margin=16)
+    z   = min(volume_z, tumor_vol.shape[2] - 1)
+    sl  = tumor_vol[y0:y1+1, x0:x1+1, z].astype(np.float32)
     sl  = torch.from_numpy(sl[None, None])
     sl  = F.interpolate(sl, size=(target_size, target_size), mode='nearest').squeeze().numpy()
     return (sl > 0.5).astype(np.float32)
@@ -253,18 +278,19 @@ def main(args):
         gradcam_dir = os.path.join(args.output_dir, 'gradcam')
         os.makedirs(gradcam_dir, exist_ok=True)
         test_ds  = MaskGuidedDataset(test_r, augment=False, n_slices=args.n_slices)
-        gcam     = GradCAM(model)
-        center_z = args.n_slices // 2
+        gcam = GradCAM(model)
         for i, (pid, lbl, prob) in enumerate(zip(pids, test_lbl, test_prob)):
             tensor, _, _, _ = test_ds[i]
+            ti, vz = get_best_display_slice(pid, n_slices=args.n_slices)
             cam   = gcam(tensor.to(device), class_idx=1)
-            t2w   = tensor[center_z * 3].numpy()
-            tumor = load_tumor_slice(pid, center_z, target_size=t2w.shape[0])
+            t2w   = tensor[ti * 3].numpy()
+            tumor = load_tumor_slice(pid, vz, target_size=t2w.shape[0])
             true  = 'csPCa' if lbl==1 else 'ciPCa'
             pred  = 'csPCa' if prob>=0.5 else 'ciPCa'
+            slice_note = f'z={vz}' if tumor.max() > 0 else f'z={vz} (no tumor)'
 
             fig, axes = plt.subplots(1, 4, figsize=(17, 4))
-            axes[0].imshow(t2w, cmap='gray');  axes[0].set_title('T2W (center, ROI)'); axes[0].axis('off')
+            axes[0].imshow(t2w, cmap='gray');  axes[0].set_title(f'T2W (ROI, {slice_note})'); axes[0].axis('off')
             axes[1].imshow(cam, cmap='jet', vmin=0, vmax=1); axes[1].set_title('Grad-CAM'); axes[1].axis('off')
             axes[2].imshow(t2w, cmap='gray')
             axes[2].imshow(cam, cmap='jet', alpha=0.5, vmin=0, vmax=1)
