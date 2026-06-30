@@ -197,7 +197,7 @@ Test set: 68 patients (10 csPCa, 58 ciPCa). Metrics reported at threshold=0.5.
 
 #### Grad-CAM Attention Maps
 
-Grad-CAM backpropagates the gradient of the csPCa prediction score through the final MedViT feature map, highlighting which spatial regions most influenced the decision. Each panel shows the T2W center slice, the Grad-CAM heatmap, and their overlay (red = high activation). All maps are from **test set** true positive patients.
+Grad-CAM backpropagates the gradient of the csPCa prediction score through the final MedViT feature map, highlighting which spatial regions most influenced the decision. Each image shows four panels: **T2W center slice | Grad-CAM heatmap | CAM overlay | Tumor mask** (red contour). The tumor mask panel lets us directly compare where the model attends versus where the ground-truth tumor is annotated. All maps are from **test set** true positive patients.
 
 **Weight Tiling (`focal_deep`) — 9 correctly detected csPCa patients**
 

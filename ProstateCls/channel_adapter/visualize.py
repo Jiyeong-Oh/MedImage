@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import numpy as np
+import nibabel as nib
 import torch
 import torch.nn.functional as F
 import matplotlib
@@ -31,6 +32,20 @@ from dataset import PatientVolumeDataset, load_labels
 # local channel-adapter model
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import build_model
+
+DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
+
+
+def load_tumor_slice(pid, center_z, target_size=224):
+    path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
+    if not os.path.exists(path):
+        return np.zeros((target_size, target_size), dtype=np.float32)
+    vol = nib.load(path).get_fdata()
+    z   = min(center_z, vol.shape[2] - 1)
+    sl  = vol[:, :, z].astype(np.float32)
+    sl  = torch.from_numpy(sl[None, None])
+    sl  = F.interpolate(sl, size=(target_size, target_size), mode='nearest').squeeze().numpy()
+    return (sl > 0.5).astype(np.float32)
 
 
 def parse_log(logfile):
@@ -258,16 +273,23 @@ def main(args):
         center_z = args.n_slices // 2
         for i, (pid, lbl, prob) in enumerate(zip(pids, test_lbl, test_prob)):
             tensor, _, _ = test_ds[i]
-            cam = gcam(tensor.to(device), class_idx=1)
-            t2w = tensor[center_z * 3].numpy()
-            fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+            cam   = gcam(tensor.to(device), class_idx=1)
+            t2w   = tensor[center_z * 3].numpy()
+            tumor = load_tumor_slice(pid, center_z, target_size=t2w.shape[0])
+            true  = 'csPCa' if lbl==1 else 'ciPCa'
+            pred  = 'csPCa' if prob>=0.5 else 'ciPCa'
+
+            fig, axes = plt.subplots(1, 4, figsize=(17, 4))
             axes[0].imshow(t2w, cmap='gray');  axes[0].set_title('T2W (center)'); axes[0].axis('off')
             axes[1].imshow(cam, cmap='jet', vmin=0, vmax=1); axes[1].set_title('Grad-CAM'); axes[1].axis('off')
             axes[2].imshow(t2w, cmap='gray')
             axes[2].imshow(cam, cmap='jet', alpha=0.5, vmin=0, vmax=1)
-            axes[2].set_title('Overlay'); axes[2].axis('off')
-            true = 'csPCa' if lbl==1 else 'ciPCa'
-            pred = 'csPCa' if prob>=0.5 else 'ciPCa'
+            axes[2].set_title('CAM Overlay'); axes[2].axis('off')
+            axes[3].imshow(t2w, cmap='gray')
+            if tumor.max() > 0:
+                axes[3].imshow(tumor, cmap='Reds', alpha=0.4, vmin=0, vmax=1)
+                axes[3].contour(tumor, levels=[0.5], colors='red', linewidths=1.5)
+            axes[3].set_title('Tumor Mask' if tumor.max() > 0 else 'Tumor Mask (none)'); axes[3].axis('off')
             fig.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})',
                          fontsize=12, color='green' if true==pred else 'red', fontweight='bold')
             plt.tight_layout()
