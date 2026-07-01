@@ -41,7 +41,7 @@ def get_best_display_slice(pid, n_slices=32):
     n_eff = min(n_slices, D)
     fallback_ti = n_slices // 2
     fallback_vz = start + fallback_ti
-    if not os.path.exists(tumor_path):
+    if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
         return fallback_ti, fallback_vz
     tumor_vol = nib.load(tumor_path).get_fdata()
     areas = np.array([tumor_vol[:, :, start + i].sum() for i in range(n_eff)])
@@ -55,7 +55,7 @@ def load_tumor_slice(pid, volume_z, target_size=224):
     """Load tumor mask at volume_z, apply same ROI crop as MaskGuidedDataset, resize to target_size."""
     tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
     gland_path = os.path.join(DATA_ROOT, pid, f'{pid}_gland.nii.gz')
-    if not os.path.exists(tumor_path):
+    if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
         return np.zeros((target_size, target_size), dtype=np.float32)
     tumor_vol = nib.load(tumor_path).get_fdata()
     gland_vol = nib.load(gland_path).get_fdata().astype(np.float32)

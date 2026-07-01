@@ -19,7 +19,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
         echo "Usage: bash 1_submit_vis.sh <run-name>"
         exit 1
     fi
-    LOG=$(ls $WORKDIR/logs/$NAME/*.out 2>/dev/null | head -1)
+    LOG=$(for f in $(ls -t $WORKDIR/logs/$NAME/*.out 2>/dev/null); do grep -q "Epoch " "$f" && echo "$f" && break; done)
     if [ -z "$LOG" ]; then
         echo "Error: no log found in logs/$NAME/"
         exit 1

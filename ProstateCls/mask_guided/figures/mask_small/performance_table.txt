@@ -1,5 +1,5 @@
-=== 9550912 ===
-Best val AUC: 0.8000 @ epoch 18
+=== 9560071 ===
+Best val AUC: 0.7707 @ epoch 5
 Test AUC:     0.8172  AP=0.3995
 
  Threshold  Sensitivity  Specificity  Precision       F1   TP   FP   TN   FN

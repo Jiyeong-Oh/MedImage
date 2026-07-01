@@ -1,5 +1,5 @@
-=== 9549479 ===
-Best val AUC: 0.7879 @ epoch 7
+=== 9560069 ===
+Best val AUC: 0.7483 @ epoch 6
 Val  AP:      0.3999
 Test AUC:     0.8793
 Test AP:      0.4436
