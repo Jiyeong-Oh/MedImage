@@ -185,47 +185,46 @@ Test set: 68 patients (10 csPCa, 58 ciPCa). Metrics reported at threshold=0.5.
 
 | Method | Configuration | Test AUC | Sensitivity | Specificity | F1 (csPCa) | TP | FP | TN | FN |
 |--------|--------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Weight Tiling | `baseline` (CE, head×1) | **0.943** | **0.80** | **0.897** | **0.667** | 8 | 6 | 52 | 2 |
+| Weight Tiling | `baseline` (CE, head×1) | 0.757 | 0.70 | 0.517 | 0.311 | 7 | 28 | 30 | 3 |
 | Weight Tiling | `focal_base` (Focal Loss, MedViT-Base, head×3) | 0.893 | 0.60 | 0.828 | 0.462 | 6 | 10 | 48 | 4 |
 | Weight Tiling | `base_ce` (CE, MedViT-Base, head×2) | 0.886 | 0.60 | 0.914 | 0.571 | 6 | 5 | 53 | 4 |
 | Weight Tiling | `focal_deep` (Focal Loss, head×3) | 0.872 | 0.90 | 0.793 | 0.581 | 9 | 12 | 46 | 1 |
 | Weight Tiling | `focal_deep_rlrop` (Focal Loss, head×2) | 0.871 | 1.00 | 0.293 | 0.328 | 10 | 41 | 17 | 0 |
 | Weight Tiling | `deeper_head` (CE, head×2) | 0.853 | 1.00 | 0.379 | 0.357 | 10 | 36 | 22 | 0 |
-| Channel Adapter | `adapter_base` (CE, MedViT-Base) | 0.879 | 0.70 | 0.810 | 0.500 | 7 | 11 | 47 | 3 |
+| Channel Adapter | `adapter_base` (CE, MedViT-Base) | 0.609 | 0.50 | 0.500 | 0.227 | 5 | 29 | 29 | 5 |
 | Mask-Guided | `mask_small` (CE, hd=2) | 0.817 | 0.70 | 0.759 | 0.452 | 7 | 14 | 44 | 3 |
 | Mask-Guided | `mask_focal_deep` (Focal Loss, hd=2) | 0.785 | 0.90 | 0.517 | 0.383 | 9 | 28 | 30 | 1 |
 | Mask-Guided | `mask_small_hd3` (CE, hd=3) | 0.712 | 0.80 | 0.655 | 0.421 | 8 | 20 | 38 | 2 |
 | Slice Transformer | `slice_tf_small` (CE, CLS pooling) | 0.764 | 0.20 | 0.950 | 0.267 | 2 | 3 | 55 | 8 |
 
-#### Grad-CAM Attention Maps
+#### Grad-CAM Activation Maps
 
-Grad-CAM backpropagates the gradient of the csPCa prediction score through the final MedViT feature map, highlighting which spatial regions most influenced the decision. Each image shows four panels: **T2W | Grad-CAM heatmap | CAM overlay | Tumor mask** (red contour). T2W is shown at the axial slice with the largest tumor cross-section within the 32-slice window, so the tumor mask and attention map are aligned to the same z. The tumor mask panel lets us directly compare where the model attends versus where the ground-truth tumor is annotated. All maps are from **test set** true positive patients.
+Grad-CAM backpropagates the gradient of the csPCa prediction score through the final MedViT feature map, highlighting which spatial regions most influenced the decision. These are **gradient-weighted activation maps** from the last convolutional layer — not attention maps from any attention mechanism. Each image shows four panels: **T2W | Grad-CAM heatmap | CAM overlay | Tumor mask** (red contour). T2W is shown at the axial slice with the largest tumor cross-section within the 32-slice window, so the tumor mask and activation map are aligned to the same z. The tumor mask panel lets us directly compare where the model's activations concentrate versus where the ground-truth tumor is annotated. All maps are from **test set** true positive patients.
 
-**Weight Tiling (`baseline`) — 8 correctly detected csPCa patients**
+**Weight Tiling (`baseline`) — 7 correctly detected csPCa patients**
 
-| Patient | Attention Map |
-|---------|--------------|
+| Patient | Grad-CAM Heatmap |
+|---------|-----------------|
 | 10043_1000043 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10043_1000043.png) |
 | 10257_1000261 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10257_1000261.png) |
 | 10463_1000471 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10463_1000471.png) |
 | 10486_1000494 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10486_1000494.png) |
 | 10549_1000561 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10549_1000561.png) |
 | 10558_1000570 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10558_1000570.png) |
-| 10568_1000580 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10568_1000580.png) |
 | 10589_1000603 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10589_1000603.png) |
 
-**Method comparison — same patient (10043_1000043), correctly detected by all three**
+**Method comparison — same patient (10257_1000261), correctly detected by all three**
 
-| Method | Attention Map |
-|--------|--------------|
-| Weight Tiling (`baseline`) | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10043_1000043.png) |
-| Channel Adapter (`adapter_base`) | ![](ProstateCls/channel_adapter/figures/adapter_base/gradcam/gradcam_10043_1000043.png) |
-| Mask-Guided (`mask_small`) | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10043_1000043.png) |
+| Method | Grad-CAM Heatmap |
+|--------|-----------------|
+| Weight Tiling (`baseline`) | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10257_1000261.png) |
+| Channel Adapter (`adapter_base`) | ![](ProstateCls/channel_adapter/figures/adapter_base/gradcam/gradcam_10257_1000261.png) |
+| Mask-Guided (`mask_small`) | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10257_1000261.png) |
 
 **Mask-Guided (`mask_small`) — 7 correctly detected csPCa patients (ROI-cropped view)**
 
-| Patient | Attention Map |
-|---------|--------------|
+| Patient | Grad-CAM Heatmap |
+|---------|-----------------|
 | 10043_1000043 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10043_1000043.png) |
 | 10257_1000261 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10257_1000261.png) |
 | 10463_1000471 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10463_1000471.png) |
@@ -240,13 +239,13 @@ Grad-CAM backpropagates the gradient of the csPCa prediction score through the f
 
 #### Weight Tiling is the most effective strategy
 
-All Weight Tiling variants achieve test AUC ≥ 0.85, with `baseline` reaching 0.943. The key advantage is that the 3×3 spatial kernel — even after inflation — can learn cross-channel spatial relationships from the very first gradient update, with pretrained spatial feature detectors providing a useful initialization. Importantly, no new parameters are introduced: the modification is entirely in how existing pretrained weights are reused.
+Most Weight Tiling variants achieve test AUC ≥ 0.85 (e.g. `focal_base` 0.893, `base_ce` 0.886), while the simplest `baseline` reaches 0.757. The key advantage is that the 3×3 spatial kernel — even after inflation — can learn cross-channel spatial relationships from the very first gradient update, with pretrained spatial feature detectors providing a useful initialization. Importantly, no new parameters are introduced: the modification is entirely in how existing pretrained weights are reused.
 
-The simplest configuration (`baseline`: CE loss, one hidden layer, small backbone) produced the highest AUC (0.943) and the best F1 (0.667), detecting 8 of 10 cancers with only 6 false positives. This suggests that the pretrained backbone features are sufficiently rich that a lightweight head can separate the two classes without overfitting — additional head capacity and focal loss appear to over-parameterize the output stage given the small dataset size. Deeper heads (`deeper_head`, `focal_deep_rlrop`) tend toward predicting everything positive (sensitivity=1.00, specificity<0.38), indicating they have not learned a discriminative decision boundary.
+The simplest configuration (`baseline`: CE loss, one hidden layer, small backbone) achieves AUC 0.757 and F1 0.311, detecting 7 of 10 cancers with 28 false positives at threshold 0.5. This suggests that the pretrained backbone features are sufficiently rich that a lightweight head can separate the two classes without overfitting — additional head capacity and focal loss appear to over-parameterize the output stage given the small dataset size. Deeper heads (`deeper_head`, `focal_deep_rlrop`) tend toward predicting everything positive (sensitivity=1.00, specificity<0.38), indicating they have not learned a discriminative decision boundary.
 
 #### Channel Adapter is viable but constrained
 
-The adapter approach achieves a competitive AUC of 0.881, but required the larger MedViT-Base backbone for stable training. The fundamental limitation is that a 1×1 convolution operates channel-wise without spatial context, making it intrinsically weaker than a 3×3 kernel at extracting spatial features across modalities. Additionally, the randomly initialized adapter generates noisy activations in early training, which small backbones cannot absorb — only the larger backbone's capacity allowed stable convergence.
+The adapter approach achieves a test AUC of 0.609, but required the larger MedViT-Base backbone for stable training. The fundamental limitation is that a 1×1 convolution operates channel-wise without spatial context, making it intrinsically weaker than a 3×3 kernel at extracting spatial features across modalities. Additionally, the randomly initialized adapter generates noisy activations in early training, which small backbones cannot absorb — only the larger backbone's capacity allowed stable convergence.
 
 A deeper two-layer adapter (96→32→3) was also tested but performed worse: the additional parameters added more noise without improving the quality of the learned projection, suggesting that the bottleneck itself (not its depth) is the binding constraint.
 
@@ -260,7 +259,7 @@ The Slice Transformer is architecturally the most principled approach: each slic
 
 #### Class imbalance remains the dominant challenge
 
-Across all approaches, sensitivity is consistently more difficult to achieve than specificity. The best model (`baseline`) detects 8 of 10 cancers while generating only 6 false positives. The small absolute number of csPCa patients in training (45) means that any single false negative in the training set has an outsized effect on gradient updates, making it difficult for the model to reliably learn the features of every cancer subtype present in the test set. Focal Loss and weighted sampling mitigate this but do not eliminate it.
+Across all approaches, sensitivity is consistently more difficult to achieve than specificity. Among the three evaluated approaches, `mask_small` achieves the best trade-off: 7 of 10 cancers detected with 14 false positives at threshold 0.5. The small absolute number of csPCa patients in training (45) means that any single false negative in the training set has an outsized effect on gradient updates, making it difficult for the model to reliably learn the features of every cancer subtype present in the test set. Focal Loss and weighted sampling mitigate this but do not eliminate it.
 
 #### Future Work
 

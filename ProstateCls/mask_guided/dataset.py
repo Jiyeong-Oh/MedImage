@@ -25,6 +25,23 @@ CSV_PATH  = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered.csv'
 
 SKIP_PATIENTS = {'10188_1000191', '10448_1000456', '10559_1000571', '10593_1000607'}
 
+TARGET_SPACING_MM = 0.5  # normalize all patients to 0.5 mm/px → 224px = 112 mm FOV
+
+
+def _resample_and_crop(tensor_chw, src_spacing, target_size=224):
+    """Resample [C,H,W] from src_spacing to TARGET_SPACING_MM mm/px, then center-crop or zero-pad to target_size."""
+    _, h, w = tensor_chw.shape
+    new_h = int(round(h * src_spacing / TARGET_SPACING_MM))
+    new_w = int(round(w * src_spacing / TARGET_SPACING_MM))
+    if new_h != h or new_w != w:
+        tensor_chw = TF.resize(tensor_chw, [new_h, new_w], antialias=True)
+    pad_h = max(0, target_size - new_h)
+    pad_w = max(0, target_size - new_w)
+    if pad_h > 0 or pad_w > 0:
+        tensor_chw = TF.pad(tensor_chw, [pad_w // 2, pad_h // 2,
+                                          pad_w - pad_w // 2, pad_h - pad_h // 2])
+    return TF.center_crop(tensor_chw, [target_size, target_size])
+
 
 def load_labels(csv_path=CSV_PATH, data_root=DATA_ROOT):
     available = set(os.listdir(data_root)) - SKIP_PATIENTS
@@ -65,10 +82,12 @@ def load_patient(pid, data_root=DATA_ROOT):
     Load T2W, ADC, gland mask.
     - Gland mask used as normalization reference (modality-specific)
     - Volumes cropped to gland bounding box + 16px margin
-    Returns dict with cropped volumes.
+    Returns dict with cropped volumes and in-plane spacing.
     """
-    folder = os.path.join(data_root, pid)
-    t2w   = nib.load(os.path.join(folder, f'{pid}_t2w.nii.gz')).get_fdata().astype(np.float32)
+    folder  = os.path.join(data_root, pid)
+    t2w_img = nib.load(os.path.join(folder, f'{pid}_t2w.nii.gz'))
+    t2w     = t2w_img.get_fdata().astype(np.float32)
+    spacing = float(t2w_img.header.get_zooms()[0])
     adc   = nib.load(os.path.join(folder, f'{pid}_adc_reg.nii.gz')).get_fdata().astype(np.float32)
     gland = nib.load(os.path.join(folder, f'{pid}_gland.nii.gz')).get_fdata().astype(np.float32)
     gland = (gland > 0.5).astype(np.float32)

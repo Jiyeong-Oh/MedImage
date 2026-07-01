@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import numpy as np
+import nibabel as nib
 import torch
 import torch.nn.functional as F
 import matplotlib
@@ -31,6 +32,40 @@ from dataset import PatientVolumeDataset, load_labels
 # local slice-transformer model
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import build_model
+
+DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
+
+
+def get_best_display_slice(pid, n_slices=32):
+    t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
+    tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
+    D     = nib.load(t2w_path).shape[2]
+    start = (D - n_slices) // 2 if D >= n_slices else 0
+    n_eff = min(n_slices, D)
+    fallback_ti = n_slices // 2
+    fallback_vz = start + fallback_ti
+    if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
+        return fallback_ti, fallback_vz
+    tumor_vol = nib.load(tumor_path).get_fdata()
+    areas = np.array([tumor_vol[:, :, start + i].sum() for i in range(n_eff)])
+    if areas.max() > 0:
+        best = int(areas.argmax())
+        return best, start + best
+    return fallback_ti, fallback_vz
+
+
+def load_tumor_slice(pid, volume_z, target_size=224):
+    path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return np.zeros((target_size, target_size), dtype=np.float32)
+    vol = nib.load(path).get_fdata()
+    z   = min(volume_z, vol.shape[2] - 1)
+    slc = vol[:, :, z].astype(np.float32)
+    if slc.shape != (target_size, target_size):
+        t = torch.from_numpy(slc).unsqueeze(0).unsqueeze(0)
+        slc = F.interpolate(t, size=(target_size, target_size),
+                            mode='bilinear', align_corners=False).squeeze().numpy()
+    return slc
 
 
 def parse_log(logfile):
@@ -57,33 +92,27 @@ def get_probs(model, records, device, n_slices):
     return np.array(lbls), np.array(probs), pids
 
 
-class GradCAM:
+class FeatureHeatmap:
     def __init__(self, model):
         self.model = model
-        self.features = self.grads = None
-        self._hooks = [
-            model.norm.register_forward_hook(
-                lambda m, i, o: setattr(self, 'features', o.detach())),
-            model.norm.register_full_backward_hook(
-                lambda m, gi, go: setattr(self, 'grads', go[0].detach())),
-        ]
+        self.features = None
+        self._hook = model.norm.register_forward_hook(
+            lambda m, i, o: setattr(self, 'features', o.detach()))
 
-    def __call__(self, tensor, class_idx=1):
+    def __call__(self, tensor):
         self.model.eval()
-        t = tensor.unsqueeze(0).requires_grad_(True)
-        self.model(t)[0, class_idx].backward()
-        w   = self.grads.mean(dim=[0, 2, 3], keepdim=True)
-        cam = F.relu((w * self.features).sum(dim=1, keepdim=True))
-        cam = cam - cam.min()
-        if cam.max() > 0:
-            cam = cam / cam.max()
-        cam = F.interpolate(cam, size=(t.shape[-2], t.shape[-1]),
-                            mode='bilinear', align_corners=False)
-        self.model.zero_grad()
-        return cam.squeeze().cpu().numpy()
+        with torch.no_grad():
+            self.model(tensor.unsqueeze(0))
+        heatmap = self.features.mean(dim=1, keepdim=True)
+        heatmap = heatmap - heatmap.min()
+        if heatmap.max() > 0:
+            heatmap = heatmap / heatmap.max()
+        heatmap = F.interpolate(heatmap, size=(tensor.shape[-2], tensor.shape[-1]),
+                                mode='bilinear', align_corners=False)
+        return heatmap.squeeze().cpu().numpy()
 
     def remove(self):
-        for h in self._hooks: h.remove()
+        self._hook.remove()
 
 
 def main(args):
@@ -254,27 +283,35 @@ def main(args):
         gradcam_dir = os.path.join(args.output_dir, 'gradcam')
         os.makedirs(gradcam_dir, exist_ok=True)
         test_ds = PatientVolumeDataset(test_r, augment=False, n_slices=args.n_slices)
-        gcam    = GradCAM(model)
-        center_z = args.n_slices // 2
+        fhm     = FeatureHeatmap(model)
         for i, (pid, lbl, prob) in enumerate(zip(pids, test_lbl, test_prob)):
             tensor, _, _ = test_ds[i]
-            cam = gcam(tensor.to(device), class_idx=1)
-            t2w = tensor[center_z * 3].numpy()
-            fig, axes = plt.subplots(1, 3, figsize=(13, 4))
-            axes[0].imshow(t2w, cmap='gray');  axes[0].set_title('T2W (center)'); axes[0].axis('off')
-            axes[1].imshow(cam, cmap='jet', vmin=0, vmax=1); axes[1].set_title('Grad-CAM'); axes[1].axis('off')
+            ti, vz  = get_best_display_slice(pid, n_slices=args.n_slices)
+            heatmap = fhm(tensor.to(device))
+            t2w     = tensor[ti * 3].numpy()
+            tumor   = load_tumor_slice(pid, vz, target_size=t2w.shape[0])
+            true  = 'csPCa' if lbl==1 else 'ciPCa'
+            pred  = 'csPCa' if prob>=0.5 else 'ciPCa'
+            slice_note = f'z={vz}' if tumor.max() > 0 else f'z={vz} (no tumor)'
+
+            fig, axes = plt.subplots(1, 4, figsize=(17, 4))
+            axes[0].imshow(t2w, cmap='gray');  axes[0].set_title(f'T2W ({slice_note})'); axes[0].axis('off')
+            axes[1].imshow(heatmap, cmap='jet', vmin=0, vmax=1); axes[1].set_title('Output Feature Heatmap'); axes[1].axis('off')
             axes[2].imshow(t2w, cmap='gray')
-            axes[2].imshow(cam, cmap='jet', alpha=0.5, vmin=0, vmax=1)
-            axes[2].set_title('Overlay'); axes[2].axis('off')
-            true = 'csPCa' if lbl==1 else 'ciPCa'
-            pred = 'csPCa' if prob>=0.5 else 'ciPCa'
+            axes[2].imshow(heatmap, cmap='jet', alpha=0.5, vmin=0, vmax=1)
+            axes[2].set_title('Feature Overlay'); axes[2].axis('off')
+            axes[3].imshow(t2w, cmap='gray')
+            if tumor.max() > 0:
+                axes[3].imshow(tumor, cmap='Reds', alpha=0.4, vmin=0, vmax=1)
+                axes[3].contour(tumor, levels=[0.5], colors='red', linewidths=1.5)
+            axes[3].set_title('Tumor Mask' if tumor.max() > 0 else 'Tumor Mask (none)'); axes[3].axis('off')
             fig.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})',
                          fontsize=12, color='green' if true==pred else 'red', fontweight='bold')
             plt.tight_layout()
             plt.savefig(os.path.join(gradcam_dir, f'gradcam_{pid}.png'), dpi=200, bbox_inches='tight')
             plt.close()
-        gcam.remove()
-        print(f"Grad-CAM saved to {gradcam_dir}/")
+        fhm.remove()
+        print(f"Feature heatmap saved to {gradcam_dir}/")
 
     print("\nDone.")
 
