@@ -28,7 +28,7 @@ from sklearn.metrics import (roc_auc_score, roc_curve, f1_score, confusion_matri
 # dataset.py is in the parent ProstateCls/ directory
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dataset import PatientVolumeDataset, load_labels, _resample_and_crop
+from dataset import PatientVolumeDataset, load_labels, _gland_centroid_2d, _fov_crop_and_resize
 from model import build_model
 
 DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
@@ -56,16 +56,19 @@ def get_best_display_slice(pid, n_slices=32):
 
 
 def load_tumor_slice(pid, volume_z, target_size=224):
-    """Load tumor mask at volume_z with same resample+crop as dataset. Returns zeros if no mask."""
+    """Load tumor mask at volume_z with same FOV crop as dataset. Returns zeros if no mask."""
     t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
     tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
+    gland_path = os.path.join(DATA_ROOT, pid, f'{pid}_gland.nii.gz')
     spacing = float(nib.load(t2w_path).header.get_zooms()[0])
+    gland_3d = (nib.load(gland_path).get_fdata() > 0.5).astype(np.float32)
+    cy, cx = _gland_centroid_2d(gland_3d)
     if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
         return np.zeros((target_size, target_size), dtype=np.float32)
     vol = nib.load(tumor_path).get_fdata()
     z   = min(volume_z, vol.shape[2] - 1)
     sl  = vol[:, :, z].astype(np.float32)
-    sl  = _resample_and_crop(torch.from_numpy(sl[None]), spacing, target_size=target_size)
+    sl  = _fov_crop_and_resize(torch.from_numpy(sl[None]), cy, cx, spacing, target_size=target_size)
     return (sl.squeeze().numpy() > 0.5).astype(np.float32)
 
 
@@ -331,7 +334,7 @@ def main(args):
             plt.savefig(os.path.join(gradcam_dir, f'gradcam_{pid}.png'), dpi=200, bbox_inches='tight')
             plt.close()
         gradcam.remove()
-        print(f"Feature heatmap saved to {gradcam_dir}/")
+        print(f"Grad-CAM saved to {gradcam_dir}/")
 
     print("\nDone.")
 

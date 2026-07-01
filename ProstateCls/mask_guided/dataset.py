@@ -25,22 +25,43 @@ CSV_PATH  = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered.csv'
 
 SKIP_PATIENTS = {'10188_1000191', '10448_1000456', '10559_1000571', '10593_1000607'}
 
-TARGET_SPACING_MM = 0.5  # normalize all patients to 0.5 mm/px → 224px = 112 mm FOV
+FOV_MM = 80.0  # fixed physical FOV (mm) centered on gland centroid
 
 
-def _resample_and_crop(tensor_chw, src_spacing, target_size=224):
-    """Resample [C,H,W] from src_spacing to TARGET_SPACING_MM mm/px, then center-crop or zero-pad to target_size."""
-    _, h, w = tensor_chw.shape
-    new_h = int(round(h * src_spacing / TARGET_SPACING_MM))
-    new_w = int(round(w * src_spacing / TARGET_SPACING_MM))
-    if new_h != h or new_w != w:
-        tensor_chw = TF.resize(tensor_chw, [new_h, new_w], antialias=True)
-    pad_h = max(0, target_size - new_h)
-    pad_w = max(0, target_size - new_w)
-    if pad_h > 0 or pad_w > 0:
-        tensor_chw = TF.pad(tensor_chw, [pad_w // 2, pad_h // 2,
-                                          pad_w - pad_w // 2, pad_h - pad_h // 2])
-    return TF.center_crop(tensor_chw, [target_size, target_size])
+def _gland_centroid_2d(gland_3d):
+    """2D (cy, cx) centroid of gland mask in pixel space, projected across all slices."""
+    proj = gland_3d.sum(axis=2)  # [H, W]
+    if proj.sum() == 0:
+        return gland_3d.shape[0] / 2.0, gland_3d.shape[1] / 2.0
+    H, W = proj.shape
+    cy = float(np.average(np.arange(H), weights=proj.sum(axis=1)))
+    cx = float(np.average(np.arange(W), weights=proj.sum(axis=0)))
+    return cy, cx
+
+
+def _fov_crop_and_resize(tensor_chw, cy, cx, spacing, target_size=224):
+    """Crop FOV_MM×FOV_MM physical region centered on (cy, cx), then resize to target_size."""
+    _, H, W = tensor_chw.shape
+    half = FOV_MM / (2.0 * spacing)
+
+    y0 = int(round(cy - half))
+    y1 = int(round(cy + half))
+    x0 = int(round(cx - half))
+    x1 = int(round(cx + half))
+
+    pad_top    = max(0, -y0)
+    pad_bottom = max(0, y1 - H)
+    pad_left   = max(0, -x0)
+    pad_right  = max(0, x1 - W)
+
+    if pad_top > 0 or pad_bottom > 0 or pad_left > 0 or pad_right > 0:
+        tensor_chw = TF.pad(tensor_chw, [pad_left, pad_top, pad_right, pad_bottom])
+
+    y0c, y1c = y0 + pad_top, y1 + pad_top
+    x0c, x1c = x0 + pad_left, x1 + pad_left
+
+    tensor_chw = tensor_chw[:, y0c:y1c, x0c:x1c]
+    return TF.resize(tensor_chw, [target_size, target_size], antialias=True)
 
 
 def load_labels(csv_path=CSV_PATH, data_root=DATA_ROOT):
@@ -53,16 +74,6 @@ def load_labels(csv_path=CSV_PATH, data_root=DATA_ROOT):
                 records.append((pid, 1 if row['case_csPCa'] == 'YES' else 0))
     return records
 
-
-def get_roi_bbox(gland_3d, margin=16):
-    """2D bounding box from max-projection of gland across all slices."""
-    proj = gland_3d.max(axis=2)          # [H, W]
-    ys, xs = np.where(proj > 0.5)
-    H, W = gland_3d.shape[:2]
-    if len(ys) == 0:
-        return 0, H - 1, 0, W - 1
-    return (max(0, int(ys.min()) - margin), min(H - 1, int(ys.max()) + margin),
-            max(0, int(xs.min()) - margin), min(W - 1, int(xs.max()) + margin))
 
 
 def percentile_norm_in_mask(arr, mask, low=1, high=99):
@@ -80,9 +91,9 @@ def percentile_norm_in_mask(arr, mask, low=1, high=99):
 def load_patient(pid, data_root=DATA_ROOT):
     """
     Load T2W, ADC, gland mask.
-    - Gland mask used as normalization reference (modality-specific)
-    - Volumes cropped to gland bounding box + 16px margin
-    Returns dict with cropped volumes and in-plane spacing.
+    - Modality-specific normalization within gland mask
+    - Gland centroid computed for fixed physical FOV crop at inference
+    Returns dict with volumes, in-plane spacing, and gland centroid (cy, cx).
     """
     folder  = os.path.join(data_root, pid)
     t2w_img = nib.load(os.path.join(folder, f'{pid}_t2w.nii.gz'))
@@ -92,24 +103,19 @@ def load_patient(pid, data_root=DATA_ROOT):
     gland = nib.load(os.path.join(folder, f'{pid}_gland.nii.gz')).get_fdata().astype(np.float32)
     gland = (gland > 0.5).astype(np.float32)
 
-    # Modality-specific normalization within mask
     t2w = percentile_norm_in_mask(t2w, gland)
     adc = percentile_norm_in_mask(adc, gland)
 
-    # ROI crop to gland bounding box
-    y0, y1, x0, x1 = get_roi_bbox(gland, margin=16)
-    t2w   = t2w[y0:y1+1, x0:x1+1, :]
-    adc   = adc[y0:y1+1, x0:x1+1, :]
-    gland = gland[y0:y1+1, x0:x1+1, :]
-
-    return {'t2w': t2w, 'adc': adc, 'gland': gland, 'spacing': spacing}
+    cy, cx = _gland_centroid_2d(gland)
+    return {'t2w': t2w, 'adc': adc, 'gland': gland, 'spacing': spacing, 'cy': cy, 'cx': cx}
 
 
 def slice_to_tensor(vols, z, target_size=224):
     arr = np.stack([vols['t2w'][:, :, z],
                     vols['adc'][:, :, z],
                     vols['gland'][:, :, z]], axis=0)
-    return _resample_and_crop(torch.from_numpy(arr), vols['spacing'], target_size=target_size)
+    return _fov_crop_and_resize(torch.from_numpy(arr), vols['cy'], vols['cx'],
+                                vols['spacing'], target_size=target_size)
 
 
 def _apply_intensity_aug(tensor, t2w_idx, adc_idx, noise_max, gamma_range, scale_range, shift_max, prob):
