@@ -95,28 +95,34 @@ def get_probs(model, records, device, n_slices):
     return np.array(lbls), np.array(probs), pids
 
 
-class FeatureHeatmap:
+class GradCAM:
     def __init__(self, model):
-        self.model = model
-        self.features = None
-        self._hook = model.norm.register_forward_hook(
+        self.model     = model
+        self.features  = None
+        self.gradients = None
+        self._fhook = model.norm.register_forward_hook(
             lambda m, i, o: setattr(self, 'features', o.detach()))
+        self._bhook = model.norm.register_full_backward_hook(
+            lambda m, gi, go: setattr(self, 'gradients', go[0].detach()))
 
-    def __call__(self, tensor):
+    def __call__(self, tensor, class_idx=1):
         self.model.eval()
+        self.model.zero_grad()
         mask = tensor[2::3].unsqueeze(0)
-        with torch.no_grad():
-            self.model(tensor.unsqueeze(0), mask)
-        heatmap = self.features.mean(dim=1, keepdim=True)
-        heatmap = heatmap - heatmap.min()
-        if heatmap.max() > 0:
-            heatmap = heatmap / heatmap.max()
-        heatmap = F.interpolate(heatmap, size=(tensor.shape[-2], tensor.shape[-1]),
-                                mode='bilinear', align_corners=False)
-        return heatmap.squeeze().cpu().numpy()
+        out  = self.model(tensor.unsqueeze(0), mask)
+        out[0, class_idx].backward()
+        weights = self.gradients.mean(dim=(2, 3), keepdim=True)
+        cam = F.relu((weights * self.features).sum(dim=1, keepdim=True))
+        cam = cam - cam.min()
+        if cam.max() > 0:
+            cam = cam / cam.max()
+        cam = F.interpolate(cam, size=(tensor.shape[-2], tensor.shape[-1]),
+                            mode='bilinear', align_corners=False)
+        return cam.squeeze().cpu().numpy()
 
     def remove(self):
-        self._hook.remove()
+        self._fhook.remove()
+        self._bhook.remove()
 
 
 def main(args):
@@ -272,11 +278,11 @@ def main(args):
         gradcam_dir = os.path.join(args.output_dir, 'gradcam')
         os.makedirs(gradcam_dir, exist_ok=True)
         test_ds  = MaskGuidedDataset(test_r, augment=False, n_slices=args.n_slices)
-        fhm = FeatureHeatmap(model)
+        gradcam = GradCAM(model)
         for i, (pid, lbl, prob) in enumerate(zip(pids, test_lbl, test_prob)):
             tensor, _, _, _ = test_ds[i]
             ti, vz  = get_best_display_slice(pid, n_slices=args.n_slices)
-            heatmap = fhm(tensor.to(device))
+            heatmap = gradcam(tensor.to(device))
             t2w     = tensor[ti * 3].numpy()
             tumor   = load_tumor_slice(pid, vz, target_size=t2w.shape[0])
             true  = 'csPCa' if lbl==1 else 'ciPCa'
@@ -285,10 +291,10 @@ def main(args):
 
             fig, axes = plt.subplots(1, 4, figsize=(17, 4))
             axes[0].imshow(t2w, cmap='gray');  axes[0].set_title(f'T2W (ROI, {slice_note})'); axes[0].axis('off')
-            axes[1].imshow(heatmap, cmap='jet', vmin=0, vmax=1); axes[1].set_title('Output Feature Heatmap'); axes[1].axis('off')
+            axes[1].imshow(heatmap, cmap='jet', vmin=0, vmax=1); axes[1].set_title('Grad-CAM'); axes[1].axis('off')
             axes[2].imshow(t2w, cmap='gray')
             axes[2].imshow(heatmap, cmap='jet', alpha=0.5, vmin=0, vmax=1)
-            axes[2].set_title('Feature Overlay'); axes[2].axis('off')
+            axes[2].set_title('Grad-CAM Overlay'); axes[2].axis('off')
             axes[3].imshow(t2w, cmap='gray')
             if tumor.max() > 0:
                 axes[3].imshow(tumor, cmap='Reds', alpha=0.4, vmin=0, vmax=1)
@@ -299,8 +305,8 @@ def main(args):
             plt.tight_layout()
             plt.savefig(os.path.join(gradcam_dir, f'gradcam_{pid}.png'), dpi=200, bbox_inches='tight')
             plt.close()
-        fhm.remove()
-        print(f"Feature heatmap saved to {gradcam_dir}/")
+        gradcam.remove()
+        print(f"Grad-CAM saved to {gradcam_dir}/")
 
     print("\nDone.")
 

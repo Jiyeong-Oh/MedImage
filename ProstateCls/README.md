@@ -99,12 +99,13 @@ Test set: 68 patients (10 csPCa, 58 ciPCa). Metrics at threshold=0.5.
 | Weight Tiling | `deeper_head` | 0.898 | 0.90 | 0.83 | 0.621 | 9 | 10 | 48 | 1 |
 | Weight Tiling | `baseline` | 0.898 | 0.90 | 0.76 | 0.545 | 9 | 14 | 44 | 1 |
 | Weight Tiling | `focal_base` | 0.822 | 0.80 | 0.83 | 0.571 | 8 | 10 | 48 | 2 |
-| Channel Adapter | `adapter_base` | 0.881 | 0.80 | 0.84 | 0.593 | 8 | 9 | 49 | 2 |
+| Channel Adapter | `adapter_base_rlrop` | 0.879 | 0.70 | 0.81 | 0.500 | 7 | 11 | 47 | 3 |
+| Channel Adapter | `adapter_base` | 0.609 | 0.50 | 0.50 | 0.227 | 5 | 29 | 29 | 5 |
 | Slice Transformer | `slice_tf_small` | 0.764 | 0.20 | 0.95 | 0.267 | 2 | 3 | 55 | 8 |
 
 **Weight Tiling dominates.** The inflated 3×3 conv retains spatial priors and requires no additional parameters beyond the channel dimension change. `focal_deep` achieves the highest AUC (0.919) and sensitivity (0.90, misses 1 of 10 cancers), preferred clinically. `base_ce` produces the fewest false positives (6 FP) for the best F1.
 
-**Channel Adapter** is viable but requires a larger backbone for stability, and the 1×1 adapter cannot capture spatial cross-channel patterns the way a 3×3 inflated conv can.
+**Channel Adapter** requires ReduceLROnPlateau scheduling to converge reliably — `adapter_base_rlrop` (AUC 0.879) is competitive with weight tiling, while `adapter_base` with a fixed LR schedule collapsed to near-random (AUC 0.609). The 1×1 adapter also cannot capture spatial cross-channel patterns the way a 3×3 inflated conv can.
 
 **Slice Transformer** overfits despite the elegant design — the Transformer encoder (~6M new params) cannot be reliably trained on 45 positive examples. Val AUC peaked at 0.824 but test AUC was only 0.764, with sensitivity collapsing to 0.20.
 
@@ -133,7 +134,7 @@ Grad-CAM highlights spatial regions driving the csPCa prediction (T2W center sli
 | Method | Grad-CAM |
 |--------|----------|
 | Weight Tiling (`focal_deep`) | ![](weight_tiling/figures/focal_deep/gradcam/gradcam_10043_1000043.png) |
-| Channel Adapter (`adapter_base`) | ![](channel_adapter/figures/adapter_base/gradcam/gradcam_10043_1000043.png) |
+| Channel Adapter (`adapter_base_rlrop`) | ![](channel_adapter/figures/adapter_base_rlrop/gradcam/gradcam_10043_1000043.png) |
 
 ---
 

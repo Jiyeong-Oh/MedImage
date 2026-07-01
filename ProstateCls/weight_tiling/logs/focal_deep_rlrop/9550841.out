@@ -4,3 +4,196 @@ GPU:    0
 Run:    focal_deep_rlrop
 Extra:  --focal-gamma 2.0 --head-depth 2
 Start:  Sun Jun 28 21:11:06 EDT 2026
+Device: cuda
+initialize_weights...
+[model] First conv inflated: 3 → 96 channels (weight tiling ÷32)
+[model] backbone: MedViT_small  proj_head: 1024 → 512 → 256 → 2  (dropout=0.2)
+Config saved: /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/weight_tiling/output/focal_deep_rlrop/config.json
+Total: 451  csPCa: 65  ciPCa: 386
+Split → train: 315 (csPCa=45) | val: 68 (csPCa=10) | test: 68 (csPCa=10)
+
+==================================================
+Train: 315 (csPCa=45, ciPCa=270)
+Val:   68   (csPCa=10, ciPCa=58)
+initialize_weights...
+[model] Pretrained backbone loaded from /N/slate/ohjiye/medvit_ckpt/MedViT_small.pth
+[model] First conv inflated: 3 → 96 channels (weight tiling ÷32)
+[model] backbone: MedViT_small  proj_head: 1024 → 512 → 256 → 2  (dropout=0.2)
+  Class weights: ciPCa=0.583  csPCa=3.500  (1:6.0)
+  Loss: FocalLoss(gamma=2.0)
+  Optimizer: backbone LR=1e-05, head(stem+proj) LR=0.0003
+  Epoch   1/150 | loss: 0.2400 | val AUC: 0.7431 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch   2/150 | loss: 0.2108 | val AUC: 0.8466 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch   3/150 | loss: 0.1866 | val AUC: 0.7552 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch   4/150 | loss: 0.1833 | val AUC: 0.8103 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch   5/150 | loss: 0.1770 | val AUC: 0.6431 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch   6/150 | loss: 0.1395 | val AUC: 0.7345 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch   7/150 | loss: 0.1716 | val AUC: 0.7690 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch   8/150 | loss: 0.1259 | val AUC: 0.6810 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch   9/150 | loss: 0.1231 | val AUC: 0.7466 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch  10/150 | loss: 0.2087 | val AUC: 0.7328 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch  11/150 | loss: 0.1146 | val AUC: 0.7414 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch  12/150 | loss: 0.1603 | val AUC: 0.7500 | LR bb=1.0e-05 hd=3.0e-04
+  Epoch  13/150 | loss: 0.0969 | val AUC: 0.7259 | LR bb=5.0e-06 hd=1.5e-04
+  LR reduced: 3.0e-04 → 1.5e-04  (patience reset)
+  Epoch  14/150 | loss: 0.1253 | val AUC: 0.7431 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  15/150 | loss: 0.0788 | val AUC: 0.7603 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  16/150 | loss: 0.0484 | val AUC: 0.7483 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  17/150 | loss: 0.0760 | val AUC: 0.7086 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  18/150 | loss: 0.1288 | val AUC: 0.7293 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  19/150 | loss: 0.0985 | val AUC: 0.7276 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  20/150 | loss: 0.0486 | val AUC: 0.7241 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  21/150 | loss: 0.1637 | val AUC: 0.7276 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  22/150 | loss: 0.0991 | val AUC: 0.7672 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  23/150 | loss: 0.1180 | val AUC: 0.7414 | LR bb=5.0e-06 hd=1.5e-04
+  Epoch  24/150 | loss: 0.1129 | val AUC: 0.7052 | LR bb=2.5e-06 hd=7.5e-05
+  LR reduced: 1.5e-04 → 7.5e-05  (patience reset)
+  Epoch  25/150 | loss: 0.0989 | val AUC: 0.7293 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  26/150 | loss: 0.0681 | val AUC: 0.7086 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  27/150 | loss: 0.1264 | val AUC: 0.7190 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  28/150 | loss: 0.0686 | val AUC: 0.7052 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  29/150 | loss: 0.0717 | val AUC: 0.7155 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  30/150 | loss: 0.0953 | val AUC: 0.7293 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  31/150 | loss: 0.0947 | val AUC: 0.7276 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  32/150 | loss: 0.1006 | val AUC: 0.7276 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  33/150 | loss: 0.0417 | val AUC: 0.7000 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  34/150 | loss: 0.0377 | val AUC: 0.7259 | LR bb=2.5e-06 hd=7.5e-05
+  Epoch  35/150 | loss: 0.0243 | val AUC: 0.7138 | LR bb=1.3e-06 hd=3.7e-05
+  LR reduced: 7.5e-05 → 3.7e-05  (patience reset)
+  Epoch  36/150 | loss: 0.0352 | val AUC: 0.7155 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  37/150 | loss: 0.0531 | val AUC: 0.7103 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  38/150 | loss: 0.1047 | val AUC: 0.7190 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  39/150 | loss: 0.0366 | val AUC: 0.7155 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  40/150 | loss: 0.0496 | val AUC: 0.7069 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  41/150 | loss: 0.1087 | val AUC: 0.7172 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  42/150 | loss: 0.1033 | val AUC: 0.6983 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  43/150 | loss: 0.0593 | val AUC: 0.7052 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  44/150 | loss: 0.0742 | val AUC: 0.7052 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  45/150 | loss: 0.0448 | val AUC: 0.7103 | LR bb=1.3e-06 hd=3.7e-05
+  Epoch  46/150 | loss: 0.0894 | val AUC: 0.7052 | LR bb=6.3e-07 hd=1.9e-05
+  LR reduced: 3.7e-05 → 1.9e-05  (patience reset)
+  Epoch  47/150 | loss: 0.0354 | val AUC: 0.6983 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  48/150 | loss: 0.0216 | val AUC: 0.7121 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  49/150 | loss: 0.1264 | val AUC: 0.7138 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  50/150 | loss: 0.0281 | val AUC: 0.7086 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  51/150 | loss: 0.0910 | val AUC: 0.7207 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  52/150 | loss: 0.0942 | val AUC: 0.6948 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  53/150 | loss: 0.0929 | val AUC: 0.7086 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  54/150 | loss: 0.1058 | val AUC: 0.7103 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  55/150 | loss: 0.0764 | val AUC: 0.7207 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  56/150 | loss: 0.0187 | val AUC: 0.7138 | LR bb=6.3e-07 hd=1.9e-05
+  Epoch  57/150 | loss: 0.0499 | val AUC: 0.7155 | LR bb=3.1e-07 hd=9.4e-06
+  LR reduced: 1.9e-05 → 9.4e-06  (patience reset)
+  Epoch  58/150 | loss: 0.1006 | val AUC: 0.7155 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  59/150 | loss: 0.0361 | val AUC: 0.7155 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  60/150 | loss: 0.0309 | val AUC: 0.7000 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  61/150 | loss: 0.0360 | val AUC: 0.7017 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  62/150 | loss: 0.0555 | val AUC: 0.7241 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  63/150 | loss: 0.0433 | val AUC: 0.7155 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  64/150 | loss: 0.1448 | val AUC: 0.7034 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  65/150 | loss: 0.0735 | val AUC: 0.7121 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  66/150 | loss: 0.0290 | val AUC: 0.7155 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  67/150 | loss: 0.0393 | val AUC: 0.7103 | LR bb=3.1e-07 hd=9.4e-06
+  Epoch  68/150 | loss: 0.0418 | val AUC: 0.7069 | LR bb=1.6e-07 hd=4.7e-06
+  LR reduced: 9.4e-06 → 4.7e-06  (patience reset)
+  Epoch  69/150 | loss: 0.0662 | val AUC: 0.7207 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  70/150 | loss: 0.0338 | val AUC: 0.7190 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  71/150 | loss: 0.0614 | val AUC: 0.7172 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  72/150 | loss: 0.0508 | val AUC: 0.7069 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  73/150 | loss: 0.0679 | val AUC: 0.7000 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  74/150 | loss: 0.0302 | val AUC: 0.7069 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  75/150 | loss: 0.0230 | val AUC: 0.7052 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  76/150 | loss: 0.0415 | val AUC: 0.7103 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  77/150 | loss: 0.0298 | val AUC: 0.7138 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  78/150 | loss: 0.0474 | val AUC: 0.7086 | LR bb=1.6e-07 hd=4.7e-06
+  Epoch  79/150 | loss: 0.1102 | val AUC: 0.7172 | LR bb=1.0e-07 hd=2.3e-06
+  LR reduced: 4.7e-06 → 2.3e-06  (patience reset)
+  Epoch  80/150 | loss: 0.0248 | val AUC: 0.7190 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  81/150 | loss: 0.0345 | val AUC: 0.7069 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  82/150 | loss: 0.0267 | val AUC: 0.7121 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  83/150 | loss: 0.0229 | val AUC: 0.7172 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  84/150 | loss: 0.0108 | val AUC: 0.7069 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  85/150 | loss: 0.1363 | val AUC: 0.7155 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  86/150 | loss: 0.0379 | val AUC: 0.7103 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  87/150 | loss: 0.0539 | val AUC: 0.7103 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  88/150 | loss: 0.0675 | val AUC: 0.7086 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  89/150 | loss: 0.0706 | val AUC: 0.7138 | LR bb=1.0e-07 hd=2.3e-06
+  Epoch  90/150 | loss: 0.0846 | val AUC: 0.7086 | LR bb=1.0e-07 hd=1.2e-06
+  LR reduced: 2.3e-06 → 1.2e-06  (patience reset)
+  Epoch  91/150 | loss: 0.0295 | val AUC: 0.7224 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch  92/150 | loss: 0.0347 | val AUC: 0.7276 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch  93/150 | loss: 0.0048 | val AUC: 0.7155 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch  94/150 | loss: 0.0724 | val AUC: 0.7155 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch  95/150 | loss: 0.0174 | val AUC: 0.7190 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch  96/150 | loss: 0.0375 | val AUC: 0.7190 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch  97/150 | loss: 0.0570 | val AUC: 0.7293 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch  98/150 | loss: 0.1383 | val AUC: 0.7138 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch  99/150 | loss: 0.0369 | val AUC: 0.7017 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch 100/150 | loss: 0.0102 | val AUC: 0.7241 | LR bb=1.0e-07 hd=1.2e-06
+  Epoch 101/150 | loss: 0.1154 | val AUC: 0.7138 | LR bb=1.0e-07 hd=5.9e-07
+  LR reduced: 1.2e-06 → 5.9e-07  (patience reset)
+  Epoch 102/150 | loss: 0.0157 | val AUC: 0.7121 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 103/150 | loss: 0.0970 | val AUC: 0.7207 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 104/150 | loss: 0.0945 | val AUC: 0.7086 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 105/150 | loss: 0.0941 | val AUC: 0.7155 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 106/150 | loss: 0.0354 | val AUC: 0.6931 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 107/150 | loss: 0.0325 | val AUC: 0.7138 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 108/150 | loss: 0.0567 | val AUC: 0.7086 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 109/150 | loss: 0.0999 | val AUC: 0.7138 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 110/150 | loss: 0.0201 | val AUC: 0.7155 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 111/150 | loss: 0.0775 | val AUC: 0.7190 | LR bb=1.0e-07 hd=5.9e-07
+  Epoch 112/150 | loss: 0.0059 | val AUC: 0.7034 | LR bb=1.0e-07 hd=2.9e-07
+  LR reduced: 5.9e-07 → 2.9e-07  (patience reset)
+  Epoch 113/150 | loss: 0.0270 | val AUC: 0.7069 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 114/150 | loss: 0.0322 | val AUC: 0.7121 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 115/150 | loss: 0.0153 | val AUC: 0.7103 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 116/150 | loss: 0.0695 | val AUC: 0.7017 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 117/150 | loss: 0.0081 | val AUC: 0.7103 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 118/150 | loss: 0.0376 | val AUC: 0.7138 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 119/150 | loss: 0.0394 | val AUC: 0.7103 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 120/150 | loss: 0.0286 | val AUC: 0.7086 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 121/150 | loss: 0.0725 | val AUC: 0.7138 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 122/150 | loss: 0.0115 | val AUC: 0.7121 | LR bb=1.0e-07 hd=2.9e-07
+  Epoch 123/150 | loss: 0.0447 | val AUC: 0.7052 | LR bb=1.0e-07 hd=1.5e-07
+  LR reduced: 2.9e-07 → 1.5e-07  (patience reset)
+  Epoch 124/150 | loss: 0.0043 | val AUC: 0.7086 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 125/150 | loss: 0.0602 | val AUC: 0.7121 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 126/150 | loss: 0.0294 | val AUC: 0.7103 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 127/150 | loss: 0.0278 | val AUC: 0.7172 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 128/150 | loss: 0.0073 | val AUC: 0.7121 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 129/150 | loss: 0.0155 | val AUC: 0.7052 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 130/150 | loss: 0.0227 | val AUC: 0.7155 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 131/150 | loss: 0.0408 | val AUC: 0.7190 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 132/150 | loss: 0.0138 | val AUC: 0.7069 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 133/150 | loss: 0.0297 | val AUC: 0.7034 | LR bb=1.0e-07 hd=1.5e-07
+  Epoch 134/150 | loss: 0.0109 | val AUC: 0.7121 | LR bb=1.0e-07 hd=1.0e-07
+  LR reduced: 1.5e-07 → 1.0e-07  (patience reset)
+  Epoch 135/150 | loss: 0.0052 | val AUC: 0.7121 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 136/150 | loss: 0.0348 | val AUC: 0.7172 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 137/150 | loss: 0.0373 | val AUC: 0.7017 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 138/150 | loss: 0.0102 | val AUC: 0.6966 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 139/150 | loss: 0.0322 | val AUC: 0.7034 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 140/150 | loss: 0.1445 | val AUC: 0.7103 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 141/150 | loss: 0.0117 | val AUC: 0.7069 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 142/150 | loss: 0.0607 | val AUC: 0.7052 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 143/150 | loss: 0.0278 | val AUC: 0.7086 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 144/150 | loss: 0.0956 | val AUC: 0.7138 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 145/150 | loss: 0.0551 | val AUC: 0.7052 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 146/150 | loss: 0.0398 | val AUC: 0.7000 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 147/150 | loss: 0.0099 | val AUC: 0.7017 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 148/150 | loss: 0.0144 | val AUC: 0.7086 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 149/150 | loss: 0.0528 | val AUC: 0.7069 | LR bb=1.0e-07 hd=1.0e-07
+  Epoch 150/150 | loss: 0.0471 | val AUC: 0.7121 | LR bb=1.0e-07 hd=1.0e-07
+
+Best val AUC: 0.8466 at epoch 2
+initialize_weights...
+[model] First conv inflated: 3 → 96 channels (weight tiling ÷32)
+[model] backbone: MedViT_small  proj_head: 1024 → 512 → 256 → 2  (dropout=0.2)
+
+=== TEST SET (68 patients: csPCa=10, ciPCa=58) ===
+AUC-ROC     : 0.8224
+Sensitivity : 0.9000
+Specificity : 0.7241
+F1 (csPCa)  : 0.5143
+TP=9  FP=16  TN=42  FN=1
+End: Sun Jun 28 21:51:09 EDT 2026
