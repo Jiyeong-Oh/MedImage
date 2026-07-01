@@ -102,15 +102,14 @@ def load_patient(pid, data_root=DATA_ROOT):
     adc   = adc[y0:y1+1, x0:x1+1, :]
     gland = gland[y0:y1+1, x0:x1+1, :]
 
-    return {'t2w': t2w, 'adc': adc, 'gland': gland}
+    return {'t2w': t2w, 'adc': adc, 'gland': gland, 'spacing': spacing}
 
 
 def slice_to_tensor(vols, z, target_size=224):
     arr = np.stack([vols['t2w'][:, :, z],
                     vols['adc'][:, :, z],
                     vols['gland'][:, :, z]], axis=0)
-    tensor = torch.from_numpy(arr)
-    return TF.resize(tensor, [target_size, target_size], antialias=True)
+    return _resample_and_crop(torch.from_numpy(arr), vols['spacing'], target_size=target_size)
 
 
 def _apply_intensity_aug(tensor, t2w_idx, adc_idx, noise_max, gamma_range, scale_range, shift_max, prob):

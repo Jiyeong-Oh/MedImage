@@ -26,7 +26,7 @@ from sklearn.metrics import (roc_auc_score, roc_curve, f1_score, confusion_matri
                              average_precision_score, precision_recall_curve)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dataset import MaskGuidedDataset, load_labels
+from dataset import MaskGuidedDataset, load_labels, _resample_and_crop
 from model import build_model
 
 DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
@@ -52,21 +52,21 @@ def get_best_display_slice(pid, n_slices=32):
 
 
 def load_tumor_slice(pid, volume_z, target_size=224):
-    """Load tumor mask at volume_z, apply same ROI crop as MaskGuidedDataset, resize to target_size."""
+    """Load tumor mask at volume_z with same gland-bbox-crop + resample+crop as MaskGuidedDataset."""
+    t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
     tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
     gland_path = os.path.join(DATA_ROOT, pid, f'{pid}_gland.nii.gz')
+    spacing = float(nib.load(t2w_path).header.get_zooms()[0])
     if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
         return np.zeros((target_size, target_size), dtype=np.float32)
     tumor_vol = nib.load(tumor_path).get_fdata()
-    gland_vol = nib.load(gland_path).get_fdata().astype(np.float32)
-    gland_vol = (gland_vol > 0.5).astype(np.float32)
+    gland_vol = (nib.load(gland_path).get_fdata() > 0.5).astype(np.float32)
     from dataset import get_roi_bbox
     y0, y1, x0, x1 = get_roi_bbox(gland_vol, margin=16)
-    z   = min(volume_z, tumor_vol.shape[2] - 1)
-    sl  = tumor_vol[y0:y1+1, x0:x1+1, z].astype(np.float32)
-    sl  = torch.from_numpy(sl[None, None])
-    sl  = F.interpolate(sl, size=(target_size, target_size), mode='nearest').squeeze().numpy()
-    return (sl > 0.5).astype(np.float32)
+    z  = min(volume_z, tumor_vol.shape[2] - 1)
+    sl = tumor_vol[y0:y1+1, x0:x1+1, z].astype(np.float32)
+    sl = _resample_and_crop(torch.from_numpy(sl[None]), spacing, target_size=target_size)
+    return (sl.squeeze().numpy() > 0.5).astype(np.float32)
 
 
 def parse_log(logfile):
