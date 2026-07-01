@@ -185,39 +185,40 @@ Test set: 68 patients (10 csPCa, 58 ciPCa). Metrics reported at threshold=0.5.
 
 | Method | Configuration | Test AUC | Sensitivity | Specificity | F1 (csPCa) | TP | FP | TN | FN |
 |--------|--------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Weight Tiling | `focal_deep` (Focal Loss, head×2) | **0.919** | **0.90** | 0.78 | 0.563 | 9 | 13 | 45 | 1 |
-| Weight Tiling | `base_ce` (CE, MedViT-Base) | 0.907 | 0.80 | **0.90** | **0.667** | 8 | 6 | 52 | 2 |
-| Weight Tiling | `deeper_head` (CE, head×2) | 0.898 | 0.90 | 0.83 | 0.621 | 9 | 10 | 48 | 1 |
-| Weight Tiling | `baseline` (CE, head×1) | 0.898 | 0.90 | 0.76 | 0.545 | 9 | 14 | 44 | 1 |
-| Weight Tiling | `focal_base` (Focal Loss, MedViT-Base) | 0.822 | 0.80 | 0.83 | 0.571 | 8 | 10 | 48 | 2 |
-| Channel Adapter | `adapter_base` (CE, MedViT-Base) | 0.881 | 0.80 | 0.84 | 0.593 | 8 | 9 | 49 | 2 |
-| Mask-Guided | `mask_focal_deep` (Focal Loss, hd=2) | 0.841 | 0.40 | **0.88** | 0.381 | 4 | 7 | 51 | 6 |
-| Mask-Guided | `mask_small` (CE, hd=2) | 0.771 | 0.70 | 0.84 | 0.538 | 7 | 9 | 49 | 3 |
-| Slice Transformer | `slice_tf_small` (CE, CLS pooling) | 0.764 | 0.20 | 0.95 | 0.267 | 2 | 3 | 55 | 8 |
+| Weight Tiling | `baseline` (CE, head×1) | **0.943** | **0.80** | **0.897** | **0.667** | 8 | 6 | 52 | 2 |
+| Weight Tiling | `focal_base` (Focal Loss, MedViT-Base, head×3) | 0.893 | 0.60 | 0.828 | 0.462 | 6 | 10 | 48 | 4 |
+| Weight Tiling | `base_ce` (CE, MedViT-Base, head×2) | 0.886 | 0.60 | 0.914 | 0.571 | 6 | 5 | 53 | 4 |
+| Weight Tiling | `focal_deep` (Focal Loss, head×3) | 0.872 | 0.90 | 0.793 | 0.581 | 9 | 12 | 46 | 1 |
+| Weight Tiling | `focal_deep_rlrop` (Focal Loss, head×2) | 0.871 | 1.00 | 0.293 | 0.328 | 10 | 41 | 17 | 0 |
+| Weight Tiling | `deeper_head` (CE, head×2) | 0.853 | 1.00 | 0.379 | 0.357 | 10 | 36 | 22 | 0 |
+| Channel Adapter | `adapter_base` (CE, MedViT-Base) | 0.879 | 0.70 | 0.810 | 0.500 | 7 | 11 | 47 | 3 |
+| Mask-Guided | `mask_small` (CE, hd=2) | 0.817 | 0.70 | 0.759 | 0.452 | 7 | 14 | 44 | 3 |
+| Mask-Guided | `mask_focal_deep` (Focal Loss, hd=2) | 0.785 | 0.90 | 0.517 | 0.383 | 9 | 28 | 30 | 1 |
+| Mask-Guided | `mask_small_hd3` (CE, hd=3) | 0.712 | 0.80 | 0.655 | 0.421 | 8 | 20 | 38 | 2 |
+| Slice Transformer | `slice_tf_small` (CE, CLS pooling) | 0.764 | 0.20 | 0.950 | 0.267 | 2 | 3 | 55 | 8 |
 
 #### Grad-CAM Attention Maps
 
 Grad-CAM backpropagates the gradient of the csPCa prediction score through the final MedViT feature map, highlighting which spatial regions most influenced the decision. Each image shows four panels: **T2W | Grad-CAM heatmap | CAM overlay | Tumor mask** (red contour). T2W is shown at the axial slice with the largest tumor cross-section within the 32-slice window, so the tumor mask and attention map are aligned to the same z. The tumor mask panel lets us directly compare where the model attends versus where the ground-truth tumor is annotated. All maps are from **test set** true positive patients.
 
-**Weight Tiling (`focal_deep`) — 9 correctly detected csPCa patients**
+**Weight Tiling (`baseline`) — 8 correctly detected csPCa patients**
 
 | Patient | Attention Map |
 |---------|--------------|
-| 10043_1000043 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10043_1000043.png) |
-| 10257_1000261 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10257_1000261.png) |
-| 10398_1000404 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10398_1000404.png) |
-| 10463_1000471 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10463_1000471.png) |
-| 10486_1000494 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10486_1000494.png) |
-| 10549_1000561 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10549_1000561.png) |
-| 10558_1000570 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10558_1000570.png) |
-| 10568_1000580 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10568_1000580.png) |
-| 10589_1000603 | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10589_1000603.png) |
+| 10043_1000043 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10043_1000043.png) |
+| 10257_1000261 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10257_1000261.png) |
+| 10463_1000471 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10463_1000471.png) |
+| 10486_1000494 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10486_1000494.png) |
+| 10549_1000561 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10549_1000561.png) |
+| 10558_1000570 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10558_1000570.png) |
+| 10568_1000580 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10568_1000580.png) |
+| 10589_1000603 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10589_1000603.png) |
 
-**Method comparison — same patient (10043_1000043), correctly detected by both**
+**Method comparison — same patient (10043_1000043), correctly detected by all three**
 
 | Method | Attention Map |
 |--------|--------------|
-| Weight Tiling (`focal_deep`) | ![](ProstateCls/weight_tiling/figures/focal_deep/gradcam/gradcam_10043_1000043.png) |
+| Weight Tiling (`baseline`) | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10043_1000043.png) |
 | Channel Adapter (`adapter_base`) | ![](ProstateCls/channel_adapter/figures/adapter_base/gradcam/gradcam_10043_1000043.png) |
 | Mask-Guided (`mask_small`) | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10043_1000043.png) |
 
@@ -227,10 +228,10 @@ Grad-CAM backpropagates the gradient of the csPCa prediction score through the f
 |---------|--------------|
 | 10043_1000043 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10043_1000043.png) |
 | 10257_1000261 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10257_1000261.png) |
-| 10398_1000404 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10398_1000404.png) |
 | 10463_1000471 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10463_1000471.png) |
-| 10549_1000561 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10549_1000561.png) |
+| 10486_1000494 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10486_1000494.png) |
 | 10558_1000570 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10558_1000570.png) |
+| 10568_1000580 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10568_1000580.png) |
 | 10589_1000603 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10589_1000603.png) |
 
 ---
@@ -239,9 +240,9 @@ Grad-CAM backpropagates the gradient of the csPCa prediction score through the f
 
 #### Weight Tiling is the most effective strategy
 
-All Weight Tiling variants achieve test AUC ≥ 0.82, with `focal_deep` reaching 0.919. The key advantage is that the 3×3 spatial kernel — even after inflation — can learn cross-channel spatial relationships from the very first gradient update, with pretrained spatial feature detectors providing a useful initialization. Importantly, no new parameters are introduced: the modification is entirely in how existing pretrained weights are reused.
+All Weight Tiling variants achieve test AUC ≥ 0.85, with `baseline` reaching 0.943. The key advantage is that the 3×3 spatial kernel — even after inflation — can learn cross-channel spatial relationships from the very first gradient update, with pretrained spatial feature detectors providing a useful initialization. Importantly, no new parameters are introduced: the modification is entirely in how existing pretrained weights are reused.
 
-The combination of Focal Loss and a two-layer MLP head (`focal_deep`) produced the highest AUC and sensitivity (0.90 — detecting 9 of 10 cancers), which is clinically most important. The `base_ce` variant (larger backbone, standard CE loss) missed 2 cancers but produced fewer false positives (6 vs 13), yielding the best F1 score. These represent different operating points along the sensitivity-specificity trade-off.
+The simplest configuration (`baseline`: CE loss, one hidden layer, small backbone) produced the highest AUC (0.943) and the best F1 (0.667), detecting 8 of 10 cancers with only 6 false positives. This suggests that the pretrained backbone features are sufficiently rich that a lightweight head can separate the two classes without overfitting — additional head capacity and focal loss appear to over-parameterize the output stage given the small dataset size. Deeper heads (`deeper_head`, `focal_deep_rlrop`) tend toward predicting everything positive (sensitivity=1.00, specificity<0.38), indicating they have not learned a discriminative decision boundary.
 
 #### Channel Adapter is viable but constrained
 
@@ -251,7 +252,7 @@ A deeper two-layer adapter (96→32→3) was also tested but performed worse: th
 
 #### Mask-Guided approach improves specificity but not sensitivity
 
-The mask-guided approach achieves a test AUC of 0.841 (`mask_focal_deep`) — higher than the Slice Transformer and competitive with the Channel Adapter — while requiring no new pretrained weights and only ~2K additional parameters. The ROI crop and within-mask normalization remove irrelevant background signals that the plain weight-tiling model must learn to ignore. However, sensitivity remains the bottleneck: the best configuration detects only 4 of 10 cancers (0.40), suggesting that the mask-guided preprocessing and spatial context signal alone are insufficient to overcome the representation learning advantage of the weight-tiling baseline. The gland mask encodes *where* the prostate is, but not *which tissue patterns within the prostate* are suspicious — that discrimination still depends on the quality of the backbone features.
+The mask-guided approach achieves a test AUC of 0.817 (`mask_small`) — above the Slice Transformer — while requiring no new pretrained weights and only ~2K additional parameters. The ROI crop and within-mask normalization remove irrelevant background signals that the plain weight-tiling model must learn to ignore. However, sensitivity and specificity remain lower than the best Weight Tiling variant: the gland mask encodes *where* the prostate is, but not *which tissue patterns within the prostate* are suspicious — that discrimination still depends on the quality of the backbone features.
 
 #### Slice Transformer overfits under data scarcity
 
@@ -259,7 +260,7 @@ The Slice Transformer is architecturally the most principled approach: each slic
 
 #### Class imbalance remains the dominant challenge
 
-Across all approaches, sensitivity is consistently more difficult to achieve than specificity. Even the best model (`focal_deep`) generates 13 false positives while missing only 1 true cancer. The small absolute number of csPCa patients in training (45) means that any single false negative in the training set has an outsized effect on gradient updates, making it difficult for the model to reliably learn the features of every cancer subtype present in the test set. Focal Loss and weighted sampling mitigate this but do not eliminate it.
+Across all approaches, sensitivity is consistently more difficult to achieve than specificity. The best model (`baseline`) detects 8 of 10 cancers while generating only 6 false positives. The small absolute number of csPCa patients in training (45) means that any single false negative in the training set has an outsized effect on gradient updates, making it difficult for the model to reliably learn the features of every cancer subtype present in the test set. Focal Loss and weighted sampling mitigate this but do not eliminate it.
 
 #### Future Work
 

@@ -1,0 +1,86 @@
+=== 9549141 ===
+Best val AUC: 0.8190 @ epoch 17
+Val  AP:      0.5461
+Test AUC:     0.9431
+Test AP:      0.8384
+
+ Threshold  Sensitivity  Specificity  Precision       F1   TP   FP   TN   FN
+---------------------------------------------------------------------------
+      0.20       0.9000       0.7586     0.3913   0.5455    9   14   44    1
+      0.30       0.9000       0.8276     0.4737   0.6207    9   10   48    1
+      0.40       0.8000       0.8621     0.5000   0.6154    8    8   50    2
+      0.50       0.8000       0.8966     0.5714   0.6667    8    6   52    2
+      0.60       0.8000       0.8966     0.5714   0.6667    8    6   52    2
+      0.70       0.8000       0.9138     0.6154   0.6957    8    5   53    2
+      0.92       0.8000       0.9655     0.8000   0.8000    8    2   56    2 ← Youden
+
+Per-patient predictions (test set):
+  PatientID            Label      Prob   Pred@0.5  Correct
+  10226_1000230        ciPCa     0.008      ciPCa       OK
+  10524_1000534        ciPCa     0.441      ciPCa       OK
+  10099_1000099        ciPCa     0.004      ciPCa       OK
+  10073_1000073        ciPCa     0.002      ciPCa       OK
+  10378_1000384        ciPCa     0.031      ciPCa       OK
+  10082_1000082        ciPCa     0.076      ciPCa       OK
+  10351_1000357        ciPCa     0.000      ciPCa       OK
+  10210_1000214        ciPCa     0.001      ciPCa       OK
+  10398_1000404        csPCa     0.393      ciPCa    WRONG
+  10407_1000414        ciPCa     0.898      csPCa    WRONG
+  10043_1000043        csPCa     0.999      csPCa       OK
+  10449_1000457        ciPCa     0.000      ciPCa       OK
+  10388_1000394        ciPCa     0.001      ciPCa       OK
+  10071_1000071        ciPCa     0.022      ciPCa       OK
+  10589_1000603        csPCa     0.999      csPCa       OK
+  10574_1000586        ciPCa     0.005      ciPCa       OK
+  10454_1000462        ciPCa     0.204      ciPCa       OK
+  10469_1000477        ciPCa     0.000      ciPCa       OK
+  10207_1000211        ciPCa     0.059      ciPCa       OK
+  10467_1000475        ciPCa     0.001      ciPCa       OK
+  10136_1000138        ciPCa     0.027      ciPCa       OK
+  10076_1000076        ciPCa     0.010      ciPCa       OK
+  10489_1000497        ciPCa     0.075      ciPCa       OK
+  10335_1000341        ciPCa     0.250      ciPCa       OK
+  10366_1000372        ciPCa     0.964      csPCa    WRONG
+  10242_1000246        ciPCa     0.001      ciPCa       OK
+  10543_1000554        ciPCa     0.109      ciPCa       OK
+  10269_1000273        ciPCa     0.000      ciPCa       OK
+  10031_1000031        ciPCa     0.000      ciPCa       OK
+  10257_1000261        csPCa     0.996      csPCa       OK
+  10430_1000438        ciPCa     0.005      ciPCa       OK
+  10185_1000188        ciPCa     0.226      ciPCa       OK
+  10130_1000131        ciPCa     0.008      ciPCa       OK
+  10175_1000178        ciPCa     0.000      ciPCa       OK
+  10267_1000271        ciPCa     0.386      ciPCa       OK
+  10153_1000156        ciPCa     0.016      ciPCa       OK
+  10530_1000540        ciPCa     0.788      csPCa    WRONG
+  10521_1000531        ciPCa     0.000      ciPCa       OK
+  10475_1000483        ciPCa     0.000      ciPCa       OK
+  10150_1000152        ciPCa     0.000      ciPCa       OK
+  10386_1000392        ciPCa     0.003      ciPCa       OK
+  10348_1000354        ciPCa     0.035      ciPCa       OK
+  10539_1000549        csPCa     0.029      ciPCa    WRONG
+  10592_1000606        ciPCa     0.000      ciPCa       OK
+  10146_1000148        ciPCa     0.204      ciPCa       OK
+  10054_1000054        ciPCa     0.019      ciPCa       OK
+  10590_1000604        ciPCa     0.000      ciPCa       OK
+  10549_1000561        csPCa     0.925      csPCa       OK
+  10270_1000274        ciPCa     0.326      ciPCa       OK
+  10069_1000069        ciPCa     0.677      csPCa    WRONG
+  10463_1000471        csPCa     0.984      csPCa       OK
+  10581_1000595        ciPCa     0.991      csPCa    WRONG
+  10251_1000255        ciPCa     0.000      ciPCa       OK
+  10558_1000570        csPCa     0.999      csPCa       OK
+  10192_1000195        ciPCa     0.001      ciPCa       OK
+  10030_1000030        ciPCa     0.036      ciPCa       OK
+  10411_1000418        ciPCa     0.001      ciPCa       OK
+  10305_1000311        ciPCa     0.023      ciPCa       OK
+  10022_1000022        ciPCa     0.820      csPCa    WRONG
+  10292_1000298        ciPCa     0.024      ciPCa       OK
+  10273_1000277        ciPCa     0.002      ciPCa       OK
+  10246_1000250        ciPCa     0.001      ciPCa       OK
+  10569_1000581        ciPCa     0.403      ciPCa       OK
+  10486_1000494        csPCa     0.982      csPCa       OK
+  10491_1000500        ciPCa     0.014      ciPCa       OK
+  10568_1000580        csPCa     0.991      csPCa       OK
+  10404_1000410        ciPCa     0.007      ciPCa       OK
+  10129_1000130        ciPCa     0.000      ciPCa       OK

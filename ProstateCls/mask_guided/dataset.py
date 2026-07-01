@@ -124,10 +124,6 @@ def augment_volume_tensor(tensor):
     tensor = TF.rotate(tensor, random.uniform(-15, 15))
     if random.random() > 0.4:
         h, w = tensor.shape[-2], tensor.shape[-1]
-        s = random.uniform(0.93, 1.07)
-        tensor = TF.center_crop(TF.resize(tensor, [int(h*s), int(w*s)], antialias=True), [h, w])
-    if random.random() > 0.4:
-        h, w = tensor.shape[-2], tensor.shape[-1]
         tensor = TF.affine(tensor, angle=0,
                            translate=[int(random.uniform(-0.08, 0.08)*w),
                                       int(random.uniform(-0.08, 0.08)*h)],
