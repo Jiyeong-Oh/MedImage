@@ -109,7 +109,7 @@ Best test set result per method (threshold = 0.5, test n = 170, csPCa = 27):
 | mask_bbox | `bbox_cw_lo` | 0.7920 | 0.296 | **0.909** | 0.333 | 8 |
 | slice_transformer | `slice_tf_warmup` | 0.7470 | 0.185 | 0.972 | 0.278 | 5 |
 | slice_wise | `slice_wise_cosine` | 0.7700 | 0.778 | 0.629 | 0.416 | 21 |
-| cnn_head | `cnn_cbam` | 0.8208 | — | — | — | — |
+| cnn_head | `cnn_cbam` | 0.8208 | 0.593 | 0.797 | 0.444 | 16 |
 
 ★ **Overall best: `mask_guided / mask_noflip` — AUC 0.8427, Sensitivity 0.926** (25/27 csPCa detected)
 
@@ -191,9 +191,17 @@ Grad-CAM is not applicable to the slice transformer architecture.
 
 ---
 
-### CNN Head — `cnn_cbam` (viz pending)
+### CNN Head — `cnn_cbam` (16 / 27 TP)
 
-CNN attention head on `[B, 1024, 7, 7]` spatial feature map. Results and Grad-CAM to be updated upon viz completion.
+CNN attention head on `[B, 1024, 7, 7]` spatial feature map — CBAM (SE + 7×7 spatial attention) variant.
+
+| Learning Curve | ROC/PR |
+|----------------|--------|
+| ![](ProstateCls/cnn_head/figures/cnn_cbam/learning_curve.png) | ![](ProstateCls/cnn_head/figures/cnn_cbam/roc_pr_curve.png) |
+
+| Patient 10085 | Patient 10220 | Patient 10626 |
+|---------------|---------------|---------------|
+| ![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10220_1000224.png) | ![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10626_1000640.png) |
 
 ---
 
