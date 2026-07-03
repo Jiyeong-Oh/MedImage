@@ -18,28 +18,41 @@ from sklearn.metrics import (roc_auc_score, roc_curve, f1_score, confusion_matri
                              average_precision_score, precision_recall_curve)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from dataset import load_labels, _gland_centroid_2d, _fov_crop_and_resize
+from dataset import (load_labels, _gland_centroid_2d, _fov_crop_and_resize,
+                     _resample_inplane, TARGET_SPACING)
+
+import importlib.util as _ilu
+_sw_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset.py')
+if 'slicewise_dataset' not in sys.modules:
+    _spec = _ilu.spec_from_file_location('slicewise_dataset', _sw_path)
+    _mod = _ilu.module_from_spec(_spec)
+    sys.modules['slicewise_dataset'] = _mod
+    _spec.loader.exec_module(_mod)
+from slicewise_dataset import SliceWiseDataset
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dataset import SliceWiseDataset
 from model import build_model
 
 DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
 
 
 def load_tumor_slice(pid, volume_z, target_size=224):
-    """Load tumor mask at volume_z with same FOV crop as the dataset."""
+    """Load tumor mask at volume_z with same resample+FOV crop as dataset."""
     t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
     tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
     gland_path = os.path.join(DATA_ROOT, pid, f'{pid}_gland.nii.gz')
-    spacing = float(nib.load(t2w_path).header.get_zooms()[0])
+    spacing  = float(nib.load(t2w_path).header.get_zooms()[0])
     gland_3d = (nib.load(gland_path).get_fdata() > 0.5).astype(np.float32)
-    cy, cx = _gland_centroid_2d(gland_3d)
+    gland_3d = _resample_inplane(gland_3d, spacing)
+    gland_3d = (gland_3d > 0.5).astype(np.float32)
+    cy, cx   = _gland_centroid_2d(gland_3d)
     if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
         return np.zeros((target_size, target_size), dtype=np.float32)
-    tumor_vol = nib.load(tumor_path).get_fdata()
-    z = min(volume_z, tumor_vol.shape[2] - 1)
-    sl = tumor_vol[:, :, z].astype(np.float32)
-    sl = _fov_crop_and_resize(torch.from_numpy(sl[None]), cy, cx, spacing, target_size=target_size)
+    tumor_vol = nib.load(tumor_path).get_fdata().astype(np.float32)
+    tumor_vol = _resample_inplane(tumor_vol, spacing)
+    z  = min(volume_z, tumor_vol.shape[2] - 1)
+    sl = tumor_vol[:, :, z]
+    sl = _fov_crop_and_resize(torch.from_numpy(sl[None]), cy, cx, TARGET_SPACING, target_size=target_size)
     return (sl.squeeze().numpy() > 0.5).astype(np.float32)
 
 

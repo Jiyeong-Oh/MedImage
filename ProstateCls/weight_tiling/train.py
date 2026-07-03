@@ -136,6 +136,9 @@ def train_model(train_records, val_records, args, device, nw):
     train_ds = PatientVolumeDataset(train_records,
                                     augment=not args.aug_strong,
                                     aug_strong=args.aug_strong,
+                                    aug_t2w_only=args.aug_t2w_only,
+                                    no_hflip=args.no_hflip,
+                                    gland_z_center=args.gland_z_center,
                                     n_slices=args.n_slices)
 
     train_labels_arr = np.array([r[1] for r in train_records], dtype=np.float64)
@@ -165,11 +168,33 @@ def train_model(train_records, val_records, args, device, nw):
 
     core      = model.module if isinstance(model, nn.DataParallel) else model
     optimizer = make_optimizer(core, args.lr_backbone, args.lr_head, args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=args.lr_factor,
-        patience=args.lr_patience, min_lr=1e-7)
+    if args.scheduler == 'cosine':
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=args.t_max, eta_min=1e-7)
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', factor=args.lr_factor,
+            patience=args.lr_patience, min_lr=1e-7)
+
+    target_lrs = [pg['lr'] for pg in optimizer.param_groups]
+
+    if args.freeze_epochs > 0:
+        for param in optimizer.param_groups[0]['params']:
+            param.requires_grad = False
+        print(f"  Backbone frozen for first {args.freeze_epochs} epochs")
 
     for epoch in range(1, args.epochs + 1):
+        if args.freeze_epochs > 0 and epoch == args.freeze_epochs + 1:
+            for param in optimizer.param_groups[0]['params']:
+                param.requires_grad = True
+            patience_count = 0
+            print(f"  Backbone unfrozen at epoch {epoch}  (patience reset)")
+
+        if args.warmup_epochs > 0 and epoch <= args.warmup_epochs:
+            scale = epoch / args.warmup_epochs
+            for i, pg in enumerate(optimizer.param_groups):
+                pg['lr'] = target_lrs[i] * scale
+
         model.train()
         running_loss = 0.0
         for imgs, lbls, _ in train_loader:
@@ -188,7 +213,11 @@ def train_model(train_records, val_records, args, device, nw):
 
         val_auc, _, _ = eval_auc(core, val_loader, device)
         old_lr_hd = optimizer.param_groups[1]['lr']
-        scheduler.step(val_auc)
+        if epoch > args.warmup_epochs:
+            if args.scheduler == 'cosine':
+                scheduler.step()
+            else:
+                scheduler.step(val_auc)
         new_lr_hd = optimizer.param_groups[1]['lr']
 
         boost_str = ''
@@ -200,7 +229,7 @@ def train_model(train_records, val_records, args, device, nw):
               f"LR bb={optimizer.param_groups[0]['lr']:.1e} hd={new_lr_hd:.1e}"
               f"{boost_str}")
 
-        if new_lr_hd < old_lr_hd:
+        if args.scheduler != 'cosine' and epoch > args.warmup_epochs and new_lr_hd < old_lr_hd:
             patience_count = 0
             print(f"  LR reduced: {old_lr_hd:.1e} → {new_lr_hd:.1e}  (patience reset)")
 
@@ -322,10 +351,23 @@ if __name__ == '__main__':
                         choices=['small', 'base', 'large'])
     parser.add_argument('--aug-strong',   action='store_true',
                         help='Use stronger augmentation (larger ranges, higher probs)')
+    parser.add_argument('--aug-t2w-only', action='store_true',
+                        help='Intensity aug on T2W only; ADC gets spatial aug only')
+    parser.add_argument('--no-hflip',       action='store_true',
+                        help='Disable horizontal flip augmentation')
+    parser.add_argument('--gland-z-center', action='store_true',
+                        help='Center 32-slice window on gland Z centroid instead of volume center')
     parser.add_argument('--val-size',     type=float, default=0.15)
     parser.add_argument('--test-size',    type=float, default=0.15)
-    parser.add_argument('--t-max',        type=int,   default=60,
-                        help='CosineAnnealingLR T_max. Should match expected training length.')
+    parser.add_argument('--warmup-epochs', type=int,   default=0,
+                        help='Linear LR warmup from 0→target over N epochs')
+    parser.add_argument('--freeze-epochs', type=int,   default=0,
+                        help='Freeze backbone for first N epochs, then unfreeze')
+    parser.add_argument('--scheduler',    type=str,   default='rlrop',
+                        choices=['rlrop', 'cosine'],
+                        help='LR scheduler: rlrop=ReduceLROnPlateau, cosine=CosineAnnealingLR')
+    parser.add_argument('--t-max',        type=int,   default=150,
+                        help='CosineAnnealingLR T_max (epochs). Used only with --scheduler cosine.')
     parser.add_argument('--boost-beta',   type=float, default=0.0)
     parser.add_argument('--boost-clip',   type=float, default=10.0)
     parser.add_argument('--output-dir',   type=str,   default='./output/split')

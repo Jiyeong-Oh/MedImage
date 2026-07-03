@@ -20,11 +20,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score, f1_score, confusion_matrix
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from dataset import load_labels
-from dataset import DATA_ROOT
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dataset import SliceWiseDataset
+sys.path.insert(1, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from dataset import SliceWiseDataset, load_labels, DATA_ROOT
 from model import build_model
 
 
@@ -83,7 +81,9 @@ def train_model(train_records, val_records, args, device, nw):
     print(f"Val:   {len(val_records)}   (csPCa={cs_val}, ciPCa={len(val_records)-cs_val})")
 
     train_ds = SliceWiseDataset(train_records, augment=not args.aug_strong,
-                                aug_strong=args.aug_strong, n_slices=args.n_slices)
+                                aug_strong=args.aug_strong, aug_t2w_only=args.aug_t2w_only,
+                                no_hflip=args.no_hflip, gland_z_center=args.gland_z_center,
+                                n_slices=args.n_slices)
     val_ds   = SliceWiseDataset(val_records, augment=False, n_slices=args.n_slices)
 
     train_labels_arr = np.array([r[1] for r in train_records], dtype=np.float64)
@@ -100,23 +100,54 @@ def train_model(train_records, val_records, args, device, nw):
                         head_depth=args.head_depth, backbone=args.backbone)
     model = model.to(device)
 
-    # BCEWithLogitsLoss on patient-level MIL-max logit
+    # BCEWithLogitsLoss (or binary focal) on patient-level MIL-max logit
     n_neg, n_pos = counts[0], counts[1]
-    pos_weight = torch.tensor([n_neg / n_pos * (args.cspca_weight if args.cspca_weight > 0
-                                                 else 1.0)], dtype=torch.float32).to(device)
+    pw_val = n_neg / n_pos * (args.cspca_weight if args.cspca_weight > 0 else 1.0)
+    pos_weight = torch.tensor([pw_val], dtype=torch.float32).to(device)
     print(f"  pos_weight: {pos_weight.item():.3f}")
-    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    if args.focal_gamma > 0:
+        print(f"  Loss: BinaryFocalLoss(gamma={args.focal_gamma})")
+        _bce_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction='none')
+        _gamma  = args.focal_gamma
+        def criterion(logits, targets):
+            bce = _bce_fn(logits, targets)
+            p_t = torch.sigmoid(logits) * targets + (1 - torch.sigmoid(logits)) * (1 - targets)
+            return ((1 - p_t) ** _gamma * bce).mean()
+    else:
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     ckpt_path                      = os.path.join(args.output_dir, 'best.pth')
     best_auc, best_epoch, patience = 0.0, 0, 0
 
     core      = model.module if isinstance(model, nn.DataParallel) else model
     optimizer = make_optimizer(core, args.lr_backbone, args.lr_head, args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=args.lr_factor,
-        patience=args.lr_patience, min_lr=1e-7)
+    if args.scheduler == 'cosine':
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=args.t_max, eta_min=1e-7)
+    else:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', factor=args.lr_factor,
+            patience=args.lr_patience, min_lr=1e-7)
+
+    target_lrs = [pg['lr'] for pg in optimizer.param_groups]
+
+    if args.freeze_epochs > 0:
+        for param in optimizer.param_groups[0]['params']:
+            param.requires_grad = False
+        print(f"  Backbone frozen for first {args.freeze_epochs} epochs")
 
     for epoch in range(1, args.epochs + 1):
+        if args.freeze_epochs > 0 and epoch == args.freeze_epochs + 1:
+            for param in optimizer.param_groups[0]['params']:
+                param.requires_grad = True
+            patience = 0
+            print(f"  Backbone unfrozen at epoch {epoch}  (patience reset)")
+
+        if args.warmup_epochs > 0 and epoch <= args.warmup_epochs:
+            scale = epoch / args.warmup_epochs
+            for i, pg in enumerate(optimizer.param_groups):
+                pg['lr'] = target_lrs[i] * scale
+
         model.train()
         running_loss = 0.0
         for imgs, lbls, _ in train_loader:
@@ -133,7 +164,11 @@ def train_model(train_records, val_records, args, device, nw):
 
         val_auc, _, _ = eval_auc(core, val_loader, device)
         old_lr_hd = optimizer.param_groups[1]['lr']
-        scheduler.step(val_auc)
+        if epoch > args.warmup_epochs:
+            if args.scheduler == 'cosine':
+                scheduler.step()
+            else:
+                scheduler.step(val_auc)
         new_lr_hd = optimizer.param_groups[1]['lr']
 
         print(f"  Epoch {epoch:3d}/{args.epochs} | "
@@ -141,7 +176,7 @@ def train_model(train_records, val_records, args, device, nw):
               f"val AUC: {val_auc:.4f} | "
               f"LR bb={optimizer.param_groups[0]['lr']:.1e} hd={new_lr_hd:.1e}")
 
-        if new_lr_hd < old_lr_hd:
+        if args.scheduler != 'cosine' and epoch > args.warmup_epochs and new_lr_hd < old_lr_hd:
             patience = 0
             print(f"  LR reduced: {old_lr_hd:.1e} → {new_lr_hd:.1e}  (patience reset)")
 
@@ -249,7 +284,20 @@ if __name__ == '__main__':
     parser.add_argument('--backbone',     type=str,   default='small',
                         choices=['small', 'base', 'large'])
     parser.add_argument('--aug-strong',   action='store_true')
+    parser.add_argument('--aug-t2w-only', action='store_true',
+                        help='Intensity aug on T2W only; ADC gets spatial aug only')
+    parser.add_argument('--no-hflip',       action='store_true',
+                        help='Disable horizontal flip augmentation')
+    parser.add_argument('--gland-z-center', action='store_true',
+                        help='Center 32-slice window on gland Z centroid instead of volume center')
     parser.add_argument('--val-size',     type=float, default=0.15)
     parser.add_argument('--test-size',    type=float, default=0.15)
+    parser.add_argument('--focal-gamma',   type=float, default=0.0,
+                        help='Binary focal loss gamma. 0=BCEWithLogitsLoss, >0=BinaryFocalLoss')
+    parser.add_argument('--warmup-epochs', type=int,   default=0)
+    parser.add_argument('--freeze-epochs', type=int,   default=0)
+    parser.add_argument('--scheduler',    type=str,   default='rlrop',
+                        choices=['rlrop', 'cosine'])
+    parser.add_argument('--t-max',        type=int,   default=150)
     parser.add_argument('--output-dir',   type=str,   default='./output/run')
     main(parser.parse_args())

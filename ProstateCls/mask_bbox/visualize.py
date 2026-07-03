@@ -26,8 +26,8 @@ from sklearn.metrics import (roc_auc_score, roc_curve, f1_score, confusion_matri
                              average_precision_score, precision_recall_curve)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dataset import (MaskGuidedDataset, load_labels, _gland_centroid_2d,
-                     _fov_crop_and_resize, _resample_inplane, TARGET_SPACING)
+from dataset import (MaskGuidedDataset, load_labels, _gland_bbox_2d,
+                     _bbox_crop_and_resize, _resample_inplane, TARGET_SPACING)
 from model import build_model
 
 DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
@@ -53,7 +53,7 @@ def get_best_display_slice(pid, n_slices=32):
 
 
 def load_tumor_slice(pid, volume_z, target_size=224):
-    """Load tumor mask at volume_z with same resample+FOV crop as MaskGuidedDataset."""
+    """Load tumor mask at volume_z with same resample+bbox crop as MaskBboxDataset."""
     t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
     tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
     gland_path = os.path.join(DATA_ROOT, pid, f'{pid}_gland.nii.gz')
@@ -61,14 +61,14 @@ def load_tumor_slice(pid, volume_z, target_size=224):
     gland_3d = (nib.load(gland_path).get_fdata() > 0.5).astype(np.float32)
     gland_3d = _resample_inplane(gland_3d, spacing)
     gland_3d = (gland_3d > 0.5).astype(np.float32)
-    cy, cx   = _gland_centroid_2d(gland_3d)
+    cy, cx, half_px = _gland_bbox_2d(gland_3d)
     if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
         return np.zeros((target_size, target_size), dtype=np.float32)
     tumor_vol = nib.load(tumor_path).get_fdata().astype(np.float32)
     tumor_vol = _resample_inplane(tumor_vol, spacing)
     z  = min(volume_z, tumor_vol.shape[2] - 1)
     sl = tumor_vol[:, :, z]
-    sl = _fov_crop_and_resize(torch.from_numpy(sl[None]), cy, cx, TARGET_SPACING, target_size=target_size)
+    sl = _bbox_crop_and_resize(torch.from_numpy(sl[None]), cy, cx, half_px, target_size=target_size)
     return (sl.squeeze().numpy() > 0.5).astype(np.float32)
 
 

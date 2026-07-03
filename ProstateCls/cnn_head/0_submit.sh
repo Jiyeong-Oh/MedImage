@@ -7,15 +7,15 @@
 #SBATCH -t 12:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ojyhi010402@gmail.com
-#SBATCH -D /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/mask_guided
+#SBATCH -D /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/cnn_head
 
 PYTHON=/N/slate/ohjiye/envs/medvit/bin/python3
-WORKDIR=/geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/mask_guided
+WORKDIR=/geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/cnn_head
 
-# ── Launcher (run locally: bash 0_submit.sh <name> [extra-args]) ──────────────
-# Default: CE loss, head_depth=2, backbone=small
-# e.g.  bash 0_submit.sh mask_base   "--backbone base"
-#        bash 0_submit.sh mask_focal  "--focal-gamma 2.0"
+# Usage: bash 0_submit.sh <run-name> [extra-args]
+# e.g.  bash 0_submit.sh cnn_se  "--cnn-head se"
+#        bash 0_submit.sh cnn_ms  "--cnn-head ms"
+#        bash 0_submit.sh cnn_cbam_cosine "--cnn-head cbam --scheduler cosine"
 if [ -z "$SLURM_JOB_ID" ]; then
     NAME=${1:?Usage: bash 0_submit.sh <run-name> [extra-args]}
     EXTRA=${2:-}
@@ -30,7 +30,6 @@ if [ -z "$SLURM_JOB_ID" ]; then
     exit 0
 fi
 
-# ── SLURM job body ────────────────────────────────────────────────────────────
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node:   $SLURMD_NODENAME"
 echo "GPU:    $CUDA_VISIBLE_DEVICES"
@@ -46,7 +45,7 @@ $PYTHON $WORKDIR/train.py \
     --lr-patience 10 \
     --weight-decay 1e-4 \
     --patience 30 \
-    --batch-size 2 \
+    --batch-size 8 \
     --seed 42 \
     --n-slices 32 \
     --val-size 0.15 \

@@ -14,6 +14,7 @@ import random
 
 import nibabel as nib
 import numpy as np
+from scipy.ndimage import zoom as ndimage_zoom
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
@@ -23,9 +24,18 @@ sys_path_parent = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
 CSV_PATH  = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered.csv'
 
-SKIP_PATIENTS = {'10188_1000191', '10448_1000456', '10559_1000571', '10593_1000607'}
+SKIP_PATIENTS = set()  # new dataset is clean — no patients need skipping
 
-FOV_MM = 80.0  # fixed physical FOV (mm) centered on gland centroid
+FOV_MM         = 80.0  # fixed physical FOV (mm) centered on gland centroid
+TARGET_SPACING = 0.5   # resample all patients to this in-plane spacing (mm)
+
+
+def _resample_inplane(arr_hwz, current_spacing):
+    """Resample H×W in-plane to TARGET_SPACING; keep Z (slice) axis unchanged."""
+    if abs(current_spacing - TARGET_SPACING) < 1e-3:
+        return arr_hwz
+    scale = current_spacing / TARGET_SPACING
+    return ndimage_zoom(arr_hwz, (scale, scale, 1.0), order=1).astype(arr_hwz.dtype)
 
 
 def _gland_centroid_2d(gland_3d):
@@ -37,6 +47,14 @@ def _gland_centroid_2d(gland_3d):
     cy = float(np.average(np.arange(H), weights=proj.sum(axis=1)))
     cx = float(np.average(np.arange(W), weights=proj.sum(axis=0)))
     return cy, cx
+
+
+def _gland_z_centroid(gland_3d):
+    """Weighted-mean Z index of gland (per-slice area as weight)."""
+    areas = gland_3d.sum(axis=(0, 1))  # [D]
+    if areas.sum() == 0:
+        return gland_3d.shape[2] // 2
+    return int(round(float(np.average(np.arange(len(areas)), weights=areas))))
 
 
 def _fov_crop_and_resize(tensor_chw, cy, cx, spacing, target_size=224):
@@ -71,7 +89,7 @@ def load_labels(csv_path=CSV_PATH, data_root=DATA_ROOT):
         for row in csv.DictReader(f):
             pid = row['patientID']
             if pid in available:
-                records.append((pid, 1 if row['case_csPCa'] == 'YES' else 0))
+                records.append((pid, 1 if row['case_csPCa'].strip() == 'YES' else 0))
     return records
 
 
@@ -103,11 +121,20 @@ def load_patient(pid, data_root=DATA_ROOT):
     gland = nib.load(os.path.join(folder, f'{pid}_gland.nii.gz')).get_fdata().astype(np.float32)
     gland = (gland > 0.5).astype(np.float32)
 
+    # resample to uniform spacing BEFORE normalization
+    t2w   = _resample_inplane(t2w,   spacing)
+    adc   = _resample_inplane(adc,   spacing)
+    gland = _resample_inplane(gland, spacing)
+    gland = (gland > 0.5).astype(np.float32)  # re-binarize after bilinear interpolation
+    spacing = TARGET_SPACING
+
     t2w = percentile_norm_in_mask(t2w, gland)
     adc = percentile_norm_in_mask(adc, gland)
 
     cy, cx = _gland_centroid_2d(gland)
-    return {'t2w': t2w, 'adc': adc, 'gland': gland, 'spacing': spacing, 'cy': cy, 'cx': cx}
+    cz     = _gland_z_centroid(gland)
+    return {'t2w': t2w, 'adc': adc, 'gland': gland, 'spacing': spacing,
+            'cy': cy, 'cx': cx, 'cz': cz}
 
 
 def slice_to_tensor(vols, z, target_size=224):
@@ -137,14 +164,12 @@ def _apply_intensity_aug(tensor, t2w_idx, adc_idx, noise_max, gamma_range, scale
     return tensor
 
 
-def augment_volume_tensor(tensor):
+def augment_volume_tensor(tensor, t2w_int_only=False, no_hflip=False):
     n_ch    = tensor.shape[0]
     t2w_idx = list(range(0, n_ch, 3))
     adc_idx = list(range(1, n_ch, 3))
-    if random.random() > 0.5:
+    if not no_hflip and random.random() > 0.5:
         tensor = TF.hflip(tensor)
-    if random.random() > 0.5:
-        tensor = TF.vflip(tensor)
     tensor = TF.rotate(tensor, random.uniform(-15, 15))
     if random.random() > 0.4:
         h, w = tensor.shape[-2], tensor.shape[-1]
@@ -155,7 +180,8 @@ def augment_volume_tensor(tensor):
     if random.random() > 0.5:
         tensor = TF.affine(tensor, angle=0, translate=[0, 0], scale=1.0,
                            shear=random.uniform(-6, 6))
-    return _apply_intensity_aug(tensor, t2w_idx, adc_idx,
+    int_adc = [] if t2w_int_only else adc_idx
+    return _apply_intensity_aug(tensor, t2w_idx, int_adc,
                                 noise_max=0.05, gamma_range=(0.85, 1.25),
                                 scale_range=(0.90, 1.10), shift_max=0.05, prob=0.4)
 
@@ -166,10 +192,13 @@ class MaskGuidedDataset(Dataset):
       x    [96, 224, 224] — ROI-cropped, mask-normalized T2W/ADC/mask channels
       mask [32, 224, 224] — gland mask per slice (x[2::3]), same spatial augment
     """
-    def __init__(self, records, augment=False, n_slices=32,
-                 input_size=224, data_root=DATA_ROOT):
-        self.augment    = augment
-        self.n_slices   = n_slices
+    def __init__(self, records, augment=False, aug_t2w_only=False, no_hflip=False,
+                 gland_z_center=False, n_slices=32, input_size=224, data_root=DATA_ROOT):
+        self.augment        = augment
+        self.aug_t2w_only   = aug_t2w_only
+        self.no_hflip       = no_hflip
+        self.gland_z_center = gland_z_center
+        self.n_slices     = n_slices
         self.input_size = input_size
         self.samples    = []
         for pid, label in records:
@@ -184,22 +213,24 @@ class MaskGuidedDataset(Dataset):
         D = vols['t2w'].shape[2]
         n = self.n_slices
 
-        if D >= n:
-            start = (D - n) // 2
-            z_range = range(start, start + n)
+        if self.gland_z_center:
+            start = vols['cz'] - n // 2
         else:
-            z_range = range(D)
+            start = (D - n) // 2 if D >= n else 0
 
         slices = []
-        for z in z_range:
-            slices.append(slice_to_tensor(vols, z, self.input_size))
-        while len(slices) < n:
-            slices.append(torch.zeros(3, self.input_size, self.input_size))
+        for i in range(n):
+            z = start + i
+            if 0 <= z < D:
+                slices.append(slice_to_tensor(vols, z, self.input_size))
+            else:
+                slices.append(torch.zeros(3, self.input_size, self.input_size))
 
         tensor = torch.cat(slices, dim=0)  # [96, H, W]
 
         if self.augment:
-            tensor = augment_volume_tensor(tensor)
+            tensor = augment_volume_tensor(tensor, t2w_int_only=self.aug_t2w_only,
+                                           no_hflip=self.no_hflip)
 
         mask = tensor[2::3]  # [32, H, W] — same spatial transform as tensor
         return tensor, mask, label, pid
