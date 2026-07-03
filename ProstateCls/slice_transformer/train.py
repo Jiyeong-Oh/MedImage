@@ -335,7 +335,9 @@ if __name__ == '__main__':
     parser.add_argument('--aug-strong',      action='store_true')
     parser.add_argument('--aug-t2w-only',    action='store_true',
                         help='Intensity aug on T2W only; ADC gets spatial aug only')
-    parser.add_argument('--no-hflip',        action='store_true',
+    parser.add_argument('--label-smoothing', type=float, default=0.0,
+                        help='Label smoothing epsilon (0=disabled, e.g. 0.1)')
+    parser.add_argument('--hflip',           action='store_true',
                         help='Disable horizontal flip augmentation')
     parser.add_argument('--gland-z-center',  action='store_true',
                         help='Center 32-slice window on gland Z centroid instead of volume center')

@@ -317,6 +317,8 @@ if __name__ == '__main__':
                         help='Use stronger augmentation (larger ranges, higher probs)')
     parser.add_argument('--hflip',         action='store_true',
                         help='Enable horizontal flip augmentation')
+    parser.add_argument('--label-smoothing', type=float, default=0.0,
+                        help='Label smoothing epsilon (0=disabled, e.g. 0.1)')
     parser.add_argument('--gland-z-center', action='store_true',
                         help='Center 32-slice window on gland Z centroid instead of volume center')
     main(parser.parse_args())

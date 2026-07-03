@@ -186,6 +186,12 @@ def augment_volume_tensor(tensor, t2w_int_only=False, no_hflip=False):
                                 scale_range=(0.90, 1.10), shift_max=0.05, prob=0.4)
 
 
+def augment_volume_tensor_scale(tensor):
+    """Scale-only augmentation (zoom in/out). No rotation, no flip, no intensity changes."""
+    scale = random.uniform(0.85, 1.15)
+    return TF.affine(tensor, angle=0, translate=[0, 0], scale=scale, shear=0)
+
+
 def augment_volume_tensor_strong(tensor, t2w_int_only=False, no_hflip=False):
     """Stronger augmentation — larger spatial/intensity ranges, higher probabilities."""
     n_ch    = tensor.shape[0]
@@ -220,11 +226,12 @@ class PatientVolumeDataset(Dataset):
     모든 슬라이스를 채널로 스택 → [n_slices*3, H, W]
     D < n_slices이면 zero-pad, D > n_slices이면 center crop
     """
-    def __init__(self, records, augment=False, aug_strong=False, aug_t2w_only=False,
+    def __init__(self, records, augment=False, aug_strong=False, aug_scale=False, aug_t2w_only=False,
                  no_hflip=False, gland_z_center=False, n_slices=32,
                  input_size=224, data_root=DATA_ROOT):
         self.augment        = augment
         self.aug_strong     = aug_strong
+        self.aug_scale      = aug_scale
         self.aug_t2w_only   = aug_t2w_only
         self.no_hflip       = no_hflip
         self.gland_z_center = gland_z_center
@@ -261,6 +268,8 @@ class PatientVolumeDataset(Dataset):
         if self.aug_strong:
             tensor = augment_volume_tensor_strong(tensor, t2w_int_only=self.aug_t2w_only,
                                                   no_hflip=self.no_hflip)
+        elif self.aug_scale:
+            tensor = augment_volume_tensor_scale(tensor)
         elif self.augment:
             tensor = augment_volume_tensor(tensor, t2w_int_only=self.aug_t2w_only,
                                            no_hflip=self.no_hflip)

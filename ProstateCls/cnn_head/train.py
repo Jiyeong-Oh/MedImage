@@ -323,4 +323,6 @@ if __name__ == '__main__':
                         choices=['rlrop', 'cosine'])
     parser.add_argument('--t-max',        type=int,   default=150)
     parser.add_argument('--output-dir',   type=str,   default='./output/run')
+    parser.add_argument('--label-smoothing', type=float, default=0.0,
+                        help='Label smoothing epsilon (0=disabled, e.g. 0.1)')
     main(parser.parse_args())
