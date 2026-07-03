@@ -204,9 +204,10 @@ class MaskGuidedDataset(Dataset):
       x    [96, 224, 224] — bbox-cropped, mask-normalized T2W/ADC/mask channels
       mask [32, 224, 224] — gland mask per slice (x[2::3]), same spatial augment
     """
-    def __init__(self, records, augment=False, aug_t2w_only=False, no_hflip=False,
+    def __init__(self, records, augment=False, aug_strong=False, aug_t2w_only=False, no_hflip=False,
                  gland_z_center=False, n_slices=32, input_size=224, data_root=DATA_ROOT):
         self.augment        = augment
+        self.aug_strong     = aug_strong
         self.aug_t2w_only   = aug_t2w_only
         self.no_hflip       = no_hflip
         self.gland_z_center = gland_z_center
@@ -240,7 +241,10 @@ class MaskGuidedDataset(Dataset):
 
         tensor = torch.cat(slices, dim=0)  # [96, H, W]
 
-        if self.augment:
+        if self.aug_strong:
+            tensor = augment_volume_tensor_strong(tensor, t2w_int_only=self.aug_t2w_only,
+                                                no_hflip=self.no_hflip)
+        elif self.augment:
             tensor = augment_volume_tensor(tensor, t2w_int_only=self.aug_t2w_only,
                                            no_hflip=self.no_hflip)
 

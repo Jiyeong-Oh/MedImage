@@ -107,10 +107,10 @@ def train_model(train_records, val_records, args, device, nw):
 
     train_ds = PatientVolumeDataset(
         train_records,
-        augment=True,
-        aug_strong=False,
+        augment=not args.aug_strong,
+        aug_strong=args.aug_strong,
         aug_t2w_only=args.aug_t2w_only,
-        no_hflip=args.no_hflip,
+        no_hflip=not args.hflip,
         gland_z_center=args.gland_z_center,
         n_slices=args.n_slices,
     )
@@ -310,7 +310,10 @@ if __name__ == '__main__':
                         help='CNN head type: se | cbam | gem | ms')
     parser.add_argument('--head-dropout', type=float, default=0.3)
     parser.add_argument('--aug-t2w-only', action='store_true')
-    parser.add_argument('--no-hflip',     action='store_true')
+    parser.add_argument('--aug-strong',   action='store_true',
+                        help='Use stronger augmentation (larger ranges, higher probs)')
+    parser.add_argument('--hflip',       action='store_true',
+                        help='Enable horizontal flip augmentation')
     parser.add_argument('--gland-z-center', action='store_true')
     parser.add_argument('--val-size',     type=float, default=0.15)
     parser.add_argument('--test-size',    type=float, default=0.15)

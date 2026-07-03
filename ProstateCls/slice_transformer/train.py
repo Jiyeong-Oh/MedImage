@@ -113,7 +113,7 @@ def train_model(train_records, val_records, args, device, nw):
                                     augment=not args.aug_strong,
                                     aug_strong=args.aug_strong,
                                     aug_t2w_only=args.aug_t2w_only,
-                                    no_hflip=args.no_hflip,
+                                    no_hflip=not args.hflip,
                                     gland_z_center=args.gland_z_center,
                                     n_slices=args.n_slices)
 

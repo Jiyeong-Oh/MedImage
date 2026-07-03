@@ -186,15 +186,38 @@ def augment_volume_tensor(tensor, t2w_int_only=False, no_hflip=False):
                                 scale_range=(0.90, 1.10), shift_max=0.05, prob=0.4)
 
 
+
+def augment_volume_tensor_strong(tensor, t2w_int_only=False, no_hflip=False):
+    n_ch    = tensor.shape[0]
+    t2w_idx = list(range(0, n_ch, 3))
+    adc_idx = list(range(1, n_ch, 3))
+    if not no_hflip and random.random() > 0.5:
+        tensor = TF.hflip(tensor)
+    tensor = TF.rotate(tensor, random.uniform(-25, 25))
+    if random.random() > 0.3:
+        h, w = tensor.shape[-2], tensor.shape[-1]
+        tensor = TF.affine(tensor, angle=0,
+                           translate=[int(random.uniform(-0.12, 0.12)*w),
+                                      int(random.uniform(-0.12, 0.12)*h)],
+                           scale=1.0, shear=0)
+    if random.random() > 0.4:
+        tensor = TF.affine(tensor, angle=0, translate=[0, 0], scale=1.0,
+                           shear=random.uniform(-12, 12))
+    int_adc = [] if t2w_int_only else adc_idx
+    return _apply_intensity_aug(tensor, t2w_idx, int_adc,
+                                noise_max=0.08, gamma_range=(0.75, 1.40),
+                                scale_range=(0.85, 1.15), shift_max=0.08, prob=0.3)
+
 class MaskGuidedDataset(Dataset):
     """
     Returns (x, mask, label, pid) where:
       x    [96, 224, 224] — ROI-cropped, mask-normalized T2W/ADC/mask channels
       mask [32, 224, 224] — gland mask per slice (x[2::3]), same spatial augment
     """
-    def __init__(self, records, augment=False, aug_t2w_only=False, no_hflip=False,
+    def __init__(self, records, augment=False, aug_strong=False, aug_t2w_only=False, no_hflip=False,
                  gland_z_center=False, n_slices=32, input_size=224, data_root=DATA_ROOT):
         self.augment        = augment
+        self.aug_strong     = aug_strong
         self.aug_t2w_only   = aug_t2w_only
         self.no_hflip       = no_hflip
         self.gland_z_center = gland_z_center
@@ -228,7 +251,10 @@ class MaskGuidedDataset(Dataset):
 
         tensor = torch.cat(slices, dim=0)  # [96, H, W]
 
-        if self.augment:
+        if self.aug_strong:
+            tensor = augment_volume_tensor_strong(tensor, t2w_int_only=self.aug_t2w_only,
+                                                no_hflip=self.no_hflip)
+        elif self.augment:
             tensor = augment_volume_tensor(tensor, t2w_int_only=self.aug_t2w_only,
                                            no_hflip=self.no_hflip)
 

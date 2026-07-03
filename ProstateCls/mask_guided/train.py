@@ -109,8 +109,9 @@ def train_model(train_records, val_records, args, device, nw):
     print(f"Train: {len(train_records)} (csPCa={cs_tr}, ciPCa={len(train_records)-cs_tr})")
     print(f"Val:   {len(val_records)}   (csPCa={cs_val}, ciPCa={len(val_records)-cs_val})")
 
-    train_ds = MaskGuidedDataset(train_records, augment=True,
-                                 aug_t2w_only=args.aug_t2w_only, no_hflip=args.no_hflip,
+    train_ds = MaskGuidedDataset(train_records, augment=not args.aug_strong,
+                                 aug_strong=args.aug_strong,
+                                 aug_t2w_only=args.aug_t2w_only, no_hflip=not args.hflip,
                                  gland_z_center=args.gland_z_center, n_slices=args.n_slices)
 
     train_labels_arr = np.array([r[1] for r in train_records], dtype=np.float64)
@@ -312,8 +313,10 @@ if __name__ == '__main__':
     parser.add_argument('--output-dir',   type=str,   default='./output/split')
     parser.add_argument('--aug-t2w-only', action='store_true',
                         help='Intensity aug on T2W only; ADC gets spatial aug only')
-    parser.add_argument('--no-hflip',       action='store_true',
-                        help='Disable horizontal flip augmentation')
+    parser.add_argument('--aug-strong',   action='store_true',
+                        help='Use stronger augmentation (larger ranges, higher probs)')
+    parser.add_argument('--hflip',         action='store_true',
+                        help='Enable horizontal flip augmentation')
     parser.add_argument('--gland-z-center', action='store_true',
                         help='Center 32-slice window on gland Z centroid instead of volume center')
     main(parser.parse_args())
