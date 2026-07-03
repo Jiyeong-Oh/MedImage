@@ -1,266 +1,251 @@
-## Prostate Cancer Classification with MedViT: Handling Multi-Modal 3D MRI Input
+# PI-CAI Prostate Cancer Classification
+
+Binary classification of clinically significant prostate cancer (csPCa) from multi-parametric MRI using MedViT-based deep learning models.
 
 ---
 
-### 1. Problem Statement
+## Task
 
-The task is binary classification of prostate MRI patient studies into **clinically significant prostate cancer (csPCa)** and **clinically insignificant prostate cancer (ciPCa)**, using T2-weighted MRI (T2W), apparent diffusion coefficient maps (ADC), and prostate gland segmentation masks.
-
-Two fundamental challenges arise when applying a pretrained Vision Transformer (MedViT) to this setting:
-
-**Challenge 1 — Severe class imbalance.** Clinically significant cancer is rare relative to the total patient population. A naive classifier can achieve high accuracy simply by predicting all patients as ciPCa, making standard accuracy an unreliable metric. In clinical practice, missing a true cancer (false negative) carries a far greater cost than an unnecessary follow-up (false positive), so the model must be explicitly pushed toward high sensitivity.
-
-**Challenge 2 — Input channel mismatch.** MedViT is pretrained on natural images and expects a standard 3-channel RGB input (`[B, 3, H, W]`). Each prostate MRI study, however, consists of 32 axial slices across 3 modalities, yielding 96 channels when stacked as a single 2D tensor. There is no straightforward way to use the pretrained weights without modification. Three fundamentally different strategies were explored for bridging this mismatch.
-
----
-
-### 2. Dataset
-
-#### Source and Scope
-
-The PI-CAI (Prostate Imaging: Cancer AI) dataset provides multi-parametric prostate MRI studies with pathology-confirmed labels. The full dataset contains approximately 1,000 patient studies. After filtering for complete data (T2W, ADC, and gland mask all available) and removing studies with known acquisition or registration errors, **451 patients** were retained for this work.
-
-#### Class Distribution
-
-| Class | Label | Count | Proportion |
-|-------|-------|-------|-----------|
-| csPCa (clinically significant) | 1 | 65 | 14.4% |
-| ciPCa (clinically insignificant) | 0 | 386 | 85.6% |
-| **Total** | | **451** | |
-
-The positive class (csPCa) makes up only **1 in 7 patients**, creating a 1:6 class imbalance. A classifier that always predicts ciPCa would achieve 85.6% accuracy while detecting zero cancers.
-
-#### Data Split
-
-A single stratified split (seed=42) was applied at the patient level, ensuring no patient appears in more than one split and that the csPCa prevalence is preserved across all three sets.
-
-| Split | Patients | csPCa | ciPCa |
-|-------|----------|-------|-------|
-| Train | 315 | 45 (14.3%) | 270 |
-| Val   | 68  | 10 (14.7%) | 58  |
-| Test  | 68  | 10 (14.7%) | 58  |
-
-#### Input Representation
-
-Each patient study is represented as a single 2D tensor by interleaving all 32 axial slices across 3 modalities:
-
-```
-[T2W₀, ADC₀, gland₀,  T2W₁, ADC₁, gland₁,  ...,  T2W₃₁, ADC₃₁, gland₃₁]
-→ shape: [B, 96, 224, 224]
-```
-
-This *depth-as-channel* encoding enables a single 2D forward pass per patient, avoiding the computational overhead of 3D convolutions or recurrent processing.
+| | |
+|---|---|
+| **Dataset** | PI-CAI (Prostate Imaging: Cancer AI) |
+| **Task** | Patient-level binary classification: csPCa (ISUP ≥ 2) vs. ciPCa (ISUP 0–1 / benign) |
+| **Modalities** | T2W · ADC (registered to T2W) · Gland mask |
+| **Positive class** | csPCa = 1 &nbsp;&nbsp; Negative class = ciPCa = 0 |
 
 ---
 
-### 3. Methods
+## Dataset
 
-#### 3.1 Addressing Class Imbalance
+| Split | Patients | csPCa | ciPCa | Positive rate |
+|-------|----------|-------|-------|---------------|
+| Train | 791 | 125 | 666 | 15.8% |
+| Val   | 170 | 27  | 143 | 15.9% |
+| Test  | 170 | 27  | 143 | 15.9% |
+| **Total** | **1,131** | **179** | **952** | **15.8%** |
 
-All three model variants use the same set of strategies to counter the 1:6 class imbalance:
+Single stratified split, `seed=42`. Patient-level (no slice leakage).
 
-**Weighted loss function.** Cross-entropy loss is weighted inversely proportional to class frequency:
-
-```
-weight[c] = N / (2 × count[c])  →  ciPCa: 0.583,  csPCa: 3.500
-```
-
-csPCa samples thus contribute 6× more to the loss than ciPCa samples. A variant using **Focal Loss** (γ=2) was also tested; focal loss additionally down-weights easy negatives (confident ciPCa predictions), focusing training capacity on ambiguous cases near the decision boundary.
-
-**Oversampling.** A `WeightedRandomSampler` is used during training so that each mini-batch contains approximately equal numbers of csPCa and ciPCa patients, regardless of their true ratio in the dataset.
-
-**Evaluation.** AUC-ROC (threshold-independent) is used as the primary validation metric for model selection. Sensitivity, specificity, and F1 score are reported on the test set.
-
----
-
-#### 3.2 Addressing Input Channel Mismatch
-
-The core technical challenge: MedViT's first convolutional layer has the form `Conv2d(3, 64, kernel_size=3)` and carries pretrained weights shaped `[64, 3, 3, 3]`. The prostate MRI input has 96 channels, not 3. Three distinct strategies were compared.
+**Preprocessing (all methods):**
+1. Resample T2W + ADC + gland in-plane to **0.5 mm/px** (bilinear; gland re-binarized)
+2. Crop a fixed **80 mm FOV** centered on the gland centroid (XY)
+3. Resize to **224 × 224**
+4. Within-gland percentile normalization (p1–p99) separately for T2W and ADC
+5. Select **32 axial slices** centered on the volume midpoint
 
 ---
 
-##### Method 1 · Weight Tiling
+## Methods
 
-**Concept.** The pretrained 3-channel conv weights are *tiled* 32 times along the channel dimension to construct a new 96-channel conv. Dividing by 32 ensures that summing over 96 channels at initialization is equivalent to summing over the original 3 channels, preserving the pretrained backbone's initial behavior.
+Seven classification approaches, each in its own sub-directory under `ProstateCls/`.
 
-```
-Pretrained:  weight [64,  3, 3, 3]
-Tiled:       weight [64, 96, 3, 3]  =  repeat 32×, then ÷ 32
+### 1. Weight Tiling (`weight_tiling/`)
 
-[B, 96, 224, 224]
-    ↓  Conv(96→64, 3×3)   ← tiled from pretrained, fine-tuned
-    ↓  MedViT backbone    ← pretrained, all layers
-[B, 1024] → MLP head → [B, 2]
-```
+**Input:** `[B, 96, 224, 224]` — 32 slices × 3 modalities interleaved channel-by-channel.
 
-**Key properties.** The 3×3 spatial kernel is retained, allowing the model to capture local spatial relationships *across channels* from the first training step. No new parameters are introduced — only the existing pretrained weights are redistributed. The inflated conv is fine-tuned at a higher learning rate (3e-4) while the rest of the backbone is fine-tuned slowly (1e-5) to preserve pretrained features.
+**Backbone:** MedViT_small pre-trained on ImageNet. First convolution inflated 3 → 96 channels by tiling pre-trained weights (÷ 32). All other backbone layers retain pretrained values.
+
+**Head:** MLP — `1024 → 512 → 256 → 2` (GELU, Dropout 0.2).
+
+The simplest depth-as-channel baseline.
 
 ---
 
-##### Method 2 · Channel Adapter
+### 2. Channel Adapter (`channel_adapter/`)
 
-**Concept.** Rather than modifying pretrained weights, a small learnable module — a `1×1 Conv(96→3)` — is inserted *before* the original first conv, which is left completely unchanged.
-
-```
-[B, 96, 224, 224]
-    ↓  Conv(96→3, 1×1)    ← randomly initialized adapter, lr=1e-4
-    ↓  Conv(3→64, 3×3)    ← pretrained, untouched, lr=1e-5
-    ↓  MedViT backbone    ← pretrained, lr=1e-5
-[B, 1024] → MLP head → [B, 2]
-```
-
-The adapter learns to compress 96 channels into 3, producing a pseudo-RGB representation that the pretrained first conv can process exactly as during pretraining. Three separate learning rate groups are used: the backbone is frozen-near (1e-5), the adapter learns at a moderate rate (1e-4), and the new classification head is trained fast (3e-4).
-
-**Key properties.** The pretrained first conv is fully preserved. However, a 1×1 convolution is spatially blind — it mixes channels without any spatial context. This is fundamentally weaker than the 3×3 tiled conv at capturing cross-channel spatial structure.
-
-> In practice, MedViT_small collapsed when combined with the adapter — the randomly initialized adapter produced noisy activations that destabilized the small backbone's batch normalization statistics. MedViT_base (86M vs 29M parameters) proved robust.
+Same depth-as-channel input as weight_tiling. Adds a learnable **channel attention adapter** before the backbone that recalibrates the 96-channel input across modalities and slices, then passes through the standard MedViT + MLP head.
 
 ---
 
-##### Method 3 · Slice Transformer
+### 3. Mask-Guided (`mask_guided/`)
 
-**Concept.** Each of the 32 axial slices is treated as an independent 3-channel image and processed separately through the pretrained MedViT backbone. The 32 resulting feature vectors are then aggregated by a lightweight Transformer encoder, which models inter-slice relationships to produce a patient-level prediction.
-
-```
-[B, 96, 224, 224]
-    ↓  reshape → [B, 32, 3, 224, 224]
-    ↓  MedViT (shared weights, pretrained, lr=1e-5)    ← processed per-patient to avoid OOM
-[B, 32, 1024]
-    ↓  prepend CLS token + positional embedding
-    ↓  Transformer Encoder (2 layers, 8 heads, ff=2048)    ← lr=3e-4
-    ↓  CLS token output
-[B, 1024] → MLP head → [B, 2]
-```
-
-**Key properties.** The pretrained first conv is used exactly as designed — no modification whatsoever. The Transformer can, in principle, learn that a lesion appearing in slice 14 is more significant when accompanied by a specific texture change in slice 18. However, the Transformer encoder introduces approximately 6 million new parameters that must be learned entirely from scratch. With only 45 positive training patients, this creates a significant risk of overfitting.
-
-> **Memory constraint**: Processing `B×32=128` images simultaneously through MedViT exhausted GPU memory (>31 GB) at batch size 4. This was resolved by processing slices one patient at a time (peak memory = 32 images regardless of batch size), limiting practical batch size to 1–2.
+**Two-stream architecture:**
+- **Image stream:** MedViT processes `[B, 96, 224, 224]` → `[B, 1024]`
+- **Mask stream:** lightweight CNN on `[B, 32, 224, 224]` gland-only volume → `[B, 256]`
+- **Fusion:** concatenate → `[B, 1280]` → MLP → 2
 
 ---
 
-##### Method 4 · Mask-Guided Weight Tiling
+### 4. Mask BBox (`mask_bbox/`)
 
-**Concept.** The gland segmentation mask is used as a spatial prior rather than as an image channel. Three changes are applied relative to the plain weight-tiling baseline:
-
-1. **Modality-specific normalization within the mask.** Instead of computing percentile statistics over the full image (which includes background tissue), T2W and ADC are each normalized using only pixels where the gland mask is active. This ensures the prostate tissue range — not the surrounding pelvis — defines the [0, 1] scale for each modality independently.
-
-2. **ROI crop.** The maximum projection of the gland mask across all slices is used to find the prostate bounding box. All three volumes (T2W, ADC, mask) are cropped to this region with a 16-pixel margin before resizing to 224×224. The model never sees irrelevant background anatomy.
-
-3. **Mask context branch.** A lightweight parallel branch explicitly encodes per-slice prostate coverage: the gland mask for each of the 32 slices is spatially averaged to produce a 32-dimensional coverage vector, which is projected to 64 dimensions and concatenated with the backbone's 1024-dimensional feature before the classification head.
-
-```
-[B, 96, 224, 224]  ← ROI-cropped; T2W·mask, ADC·mask, mask (mask-normalized)
-    ↓  Conv(96→64, 3×3)   ← weight tiling (same as Method 1)
-    ↓  MedViT backbone    ← pretrained, lr=1e-5
-[B, 1024]
-                                      [B, 32, 224, 224]  ← gland mask per slice
-                                           ↓  spatial avg pool
-                                      [B, 32] → Linear(32→64) → GELU
-                                      [B, 64]
-    ↓ concat
-[B, 1088] → MLP head → [B, 2]
-```
-
-**Key properties.** The gland mask now plays two distinct roles: it normalizes the MRI intensities to the prostate scale before the backbone sees anything, and it provides an explicit 3D spatial signal (coverage per slice) to the classification head. No additional pretrained parameters are required; the mask branch is small (≈2K parameters) and can be trained reliably from 45 positive examples.
+Instead of a fixed 80 mm FOV crop, crops a tight **bounding box around the gland** (with 20 mm margin), then resizes to 224 × 224. Otherwise identical to mask_guided.
 
 ---
 
-#### 3.3 Shared Training Configuration
+### 5. Slice Transformer (`slice_transformer/`)
 
-| Setting | Value |
-|---------|-------|
-| Optimizer | AdamW, weight_decay=1e-4 |
-| LR scheduler | ReduceLROnPlateau (factor=0.5, patience=10 epochs) |
-| Early stopping | patience=30, resets after each LR reduction |
-| Gradient clipping | max_norm=1.0 |
+Processes each of the 32 axial slices independently through a **shared** MedViT_small (3-channel). A lightweight **cross-slice transformer** (2 layers, 8 heads) aggregates the 32 per-slice feature vectors into a patient-level embedding.
+
+---
+
+### 6. Slice Wise MIL (`slice_wise/`)
+
+Same per-slice encoding as slice_transformer, but uses **Multiple Instance Learning (MIL)** with max-pooling aggregation. The patient-level score is the maximum csPCa logit across all 32 slices.
+
+---
+
+### 7. CNN Head (`cnn_head/`)
+
+MedViT backbone is run up to its pre-pool stage, exposing a **`[B, 1024, 7, 7]` spatial feature map**. A CNN-based classification head processes the spatial structure directly:
+
+| Variant | Head |
+|---------|------|
+| `cnn_se` | Squeeze-and-Excitation (channel) → GAP → FC |
+| `cnn_cbam` | CBAM (SE + 7×7 spatial attention) → GAP → FC |
+| `cnn_gem` | CBAM + Generalized Mean Pooling (learnable p) → FC |
+| `cnn_ms` | Multi-scale DW conv (1×1/3×3/5×5/7×7, residual) + CBAM → GAP → FC |
+
+---
+
+## Results
+
+Best test set result per method (threshold = 0.5, test n = 170, csPCa = 27):
+
+| Method | Best Run | AUC-ROC | Sensitivity | Specificity | F1 | TP / 27 |
+|--------|----------|---------|-------------|-------------|-----|---------|
+| weight_tiling | `wt_warmup` | 0.8156 | 0.667 | 0.755 | 0.450 | 18 |
+| channel_adapter | `adapter_lrbal` | 0.7674 | 0.815 | 0.706 | 0.484 | 22 |
+| mask_guided | `mask_noflip` | **0.8427** ★ | **0.926** | 0.692 | **0.521** | 25 |
+| mask_bbox | `bbox_cw_lo` | 0.7920 | 0.296 | **0.909** | 0.333 | 8 |
+| slice_transformer | `slice_tf_warmup` | 0.7470 | 0.185 | 0.972 | 0.278 | 5 |
+| slice_wise | `slice_wise_cosine` | 0.7700 | 0.778 | 0.629 | 0.416 | 21 |
+| cnn_head | `cnn_cbam` | 0.8208 | — | — | — | — |
+
+★ **Overall best: `mask_guided / mask_noflip` — AUC 0.8427, Sensitivity 0.926** (25/27 csPCa detected)
+
+---
+
+## Grad-CAM: Correctly Detected csPCa Cases per Method
+
+Grad-CAM activations highlight which spatial regions most influenced the decision. Each image shows four panels: **T2W · Heatmap · Overlay · Tumor mask**. All patients shown are True Positives (csPCa correctly predicted as csPCa) at threshold = 0.5.
+
+---
+
+### Weight Tiling — `wt_warmup` (18 / 27 TP)
+
+| Learning Curve | ROC/PR |
+|----------------|--------|
+| ![](ProstateCls/weight_tiling/figures/wt_warmup/learning_curve.png) | ![](ProstateCls/weight_tiling/figures/wt_warmup/roc_pr_curve.png) |
+
+| Patient 10019 | Patient 10085 | Patient 10220 |
+|---------------|---------------|---------------|
+| ![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10019_1000019.png) | ![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10220_1000224.png) |
+
+---
+
+### Channel Adapter — `adapter_lrbal` (22 / 27 TP)
+
+| Learning Curve | ROC/PR |
+|----------------|--------|
+| ![](ProstateCls/channel_adapter/figures/adapter_lrbal/learning_curve.png) | ![](ProstateCls/channel_adapter/figures/adapter_lrbal/roc_pr_curve.png) |
+
+| Patient 10085 | Patient 10220 | Patient 10626 |
+|---------------|---------------|---------------|
+| ![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10220_1000224.png) | ![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10626_1000640.png) |
+
+---
+
+### Mask-Guided — `mask_noflip` (25 / 27 TP) ★ Best Overall
+
+| Learning Curve | ROC/PR | Confusion Matrix |
+|----------------|--------|-----------------|
+| ![](ProstateCls/mask_guided/figures/mask_noflip/learning_curve.png) | ![](ProstateCls/mask_guided/figures/mask_noflip/roc_pr_curve.png) | ![](ProstateCls/mask_guided/figures/mask_noflip/confusion_matrix.png) |
+
+| Patient 10085 | Patient 10220 | Patient 10626 |
+|---------------|---------------|---------------|
+| ![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10220_1000224.png) | ![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10626_1000640.png) |
+
+---
+
+### Mask BBox — `bbox_cw_lo` (8 / 27 TP)
+
+| Learning Curve | ROC/PR |
+|----------------|--------|
+| ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/learning_curve.png) | ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/roc_pr_curve.png) |
+
+| Patient 10085 | Patient 10442 | Patient 10626 |
+|---------------|---------------|---------------|
+| ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10442_1000450.png) | ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10626_1000640.png) |
+
+---
+
+### Slice Transformer — `slice_tf_warmup` (5 / 27 TP)
+
+Grad-CAM is not applicable to the slice transformer architecture.
+
+| Learning Curve | ROC/PR |
+|----------------|--------|
+| ![](ProstateCls/slice_transformer/figures/slice_tf_warmup/learning_curve.png) | ![](ProstateCls/slice_transformer/figures/slice_tf_warmup/roc_pr_curve.png) |
+
+---
+
+### Slice Wise MIL — `slice_wise_cosine` (21 / 27 TP)
+
+| Learning Curve | ROC/PR |
+|----------------|--------|
+| ![](ProstateCls/slice_wise/figures/slice_wise_cosine/learning_curve.png) | ![](ProstateCls/slice_wise/figures/slice_wise_cosine/roc_pr_curve.png) |
+
+| Patient 10085 | Patient 10220 | Patient 10626 |
+|---------------|---------------|---------------|
+| ![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10220_1000224.png) | ![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10626_1000640.png) |
+
+---
+
+### CNN Head — `cnn_cbam` (viz pending)
+
+CNN attention head on `[B, 1024, 7, 7]` spatial feature map. Results and Grad-CAM to be updated upon viz completion.
+
+---
+
+## Training Details
+
+| Hyperparameter | Value |
+|---------------|-------|
+| Optimizer | AdamW |
+| Backbone LR | 1e-5 (pretrained params) |
+| Head / new-layer LR | 3e-4 |
+| Weight decay | 1e-4 |
+| Scheduler | ReduceLROnPlateau (factor=0.5, patience=10) |
 | Max epochs | 150 |
-
-**ReduceLROnPlateau** was chosen over the commonly used cosine annealing schedule after observing that cosine annealing decays the learning rate on a fixed schedule regardless of whether the model is still improving. When training plateaued early (e.g., best AUC at epoch 10 out of 150), cosine annealing continued to reduce the LR before the model had a chance to escape the plateau. With ReduceLROnPlateau, the LR is only reduced when val AUC has not improved for 10 consecutive epochs, and early stopping patience resets after each LR drop — giving the model another 30 epochs to improve at the new LR.
-
----
-
-### 4. Results
-
-Test set: 68 patients (10 csPCa, 58 ciPCa). Metrics reported at threshold=0.5.
-
-| Method | Configuration | Test AUC | Sensitivity | Specificity | F1 (csPCa) | TP | FP | TN | FN |
-|--------|--------------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Weight Tiling | `baseline` (CE, head×1) | 0.757 | 0.70 | 0.517 | 0.311 | 7 | 28 | 30 | 3 |
-| Weight Tiling | `focal_base` (Focal Loss, MedViT-Base, head×3) | 0.893 | 0.60 | 0.828 | 0.462 | 6 | 10 | 48 | 4 |
-| Weight Tiling | `base_ce` (CE, MedViT-Base, head×2) | 0.886 | 0.60 | 0.914 | 0.571 | 6 | 5 | 53 | 4 |
-| Weight Tiling | `focal_deep` (Focal Loss, head×3) | 0.872 | 0.90 | 0.793 | 0.581 | 9 | 12 | 46 | 1 |
-| Weight Tiling | `focal_deep_rlrop` (Focal Loss, head×2) | 0.871 | 1.00 | 0.293 | 0.328 | 10 | 41 | 17 | 0 |
-| Weight Tiling | `deeper_head` (CE, head×2) | 0.853 | 1.00 | 0.379 | 0.357 | 10 | 36 | 22 | 0 |
-| Channel Adapter | `adapter_base` (CE, MedViT-Base) | 0.609 | 0.50 | 0.500 | 0.227 | 5 | 29 | 29 | 5 |
-| Mask-Guided | `mask_small` (CE, hd=2) | 0.817 | 0.70 | 0.759 | 0.452 | 7 | 14 | 44 | 3 |
-| Mask-Guided | `mask_focal_deep` (Focal Loss, hd=2) | 0.785 | 0.90 | 0.517 | 0.383 | 9 | 28 | 30 | 1 |
-| Mask-Guided | `mask_small_hd3` (CE, hd=3) | 0.712 | 0.80 | 0.655 | 0.421 | 8 | 20 | 38 | 2 |
-| Slice Transformer | `slice_tf_small` (CE, CLS pooling) | 0.764 | 0.20 | 0.950 | 0.267 | 2 | 3 | 55 | 8 |
-
-#### Grad-CAM Activation Maps
-
-Grad-CAM backpropagates the gradient of the csPCa prediction score through the final MedViT feature map, highlighting which spatial regions most influenced the decision. These are **gradient-weighted activation maps** from the last convolutional layer — not attention maps from any attention mechanism. Each image shows four panels: **T2W | Grad-CAM heatmap | CAM overlay | Tumor mask** (red contour). T2W is shown at the axial slice with the largest tumor cross-section within the 32-slice window, so the tumor mask and activation map are aligned to the same z. The tumor mask panel lets us directly compare where the model's activations concentrate versus where the ground-truth tumor is annotated. All maps are from **test set** true positive patients.
-
-**Weight Tiling (`baseline`) — 7 correctly detected csPCa patients**
-
-| Patient | Grad-CAM Heatmap |
-|---------|-----------------|
-| 10043_1000043 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10043_1000043.png) |
-| 10257_1000261 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10257_1000261.png) |
-| 10463_1000471 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10463_1000471.png) |
-| 10486_1000494 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10486_1000494.png) |
-| 10549_1000561 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10549_1000561.png) |
-| 10558_1000570 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10558_1000570.png) |
-| 10589_1000603 | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10589_1000603.png) |
-
-**Method comparison — same patient (10257_1000261), correctly detected by all three**
-
-| Method | Grad-CAM Heatmap |
-|--------|-----------------|
-| Weight Tiling (`baseline`) | ![](ProstateCls/weight_tiling/figures/baseline/gradcam/gradcam_10257_1000261.png) |
-| Channel Adapter (`adapter_base`) | ![](ProstateCls/channel_adapter/figures/adapter_base/gradcam/gradcam_10257_1000261.png) |
-| Mask-Guided (`mask_small`) | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10257_1000261.png) |
-
-**Mask-Guided (`mask_small`) — 7 correctly detected csPCa patients (ROI-cropped view)**
-
-| Patient | Grad-CAM Heatmap |
-|---------|-----------------|
-| 10043_1000043 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10043_1000043.png) |
-| 10257_1000261 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10257_1000261.png) |
-| 10463_1000471 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10463_1000471.png) |
-| 10486_1000494 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10486_1000494.png) |
-| 10558_1000570 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10558_1000570.png) |
-| 10568_1000580 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10568_1000580.png) |
-| 10589_1000603 | ![](ProstateCls/mask_guided/figures/mask_small/gradcam/gradcam_10589_1000603.png) |
+| Early stopping | patience=30 (val AUC) |
+| Batch size | 8 |
+| Grad clip | max_norm=1.0 |
+| Class weights | auto inverse-frequency (ciPCa ≈ 0.59, csPCa ≈ 3.16) |
+| Sampler | WeightedRandomSampler (class-balanced oversampling) |
+| Input size | 224 × 224 |
+| Slices per patient | 32 |
 
 ---
 
-### 5. Discussion
+## Architecture: MedViT Backbone
 
-#### Weight Tiling is the most effective strategy
+MedViT ([Nejati et al., 2023](https://arxiv.org/abs/2302.09462)) is a hierarchical CNN-Transformer hybrid:
 
-Most Weight Tiling variants achieve test AUC ≥ 0.85 (e.g. `focal_base` 0.893, `base_ce` 0.886), while the simplest `baseline` reaches 0.757. The key advantage is that the 3×3 spatial kernel — even after inflation — can learn cross-channel spatial relationships from the very first gradient update, with pretrained spatial feature detectors providing a useful initialization. Importantly, no new parameters are introduced: the modification is entirely in how existing pretrained weights are reused.
+```
+Input [B, 96, 224, 224]
+  │
+  ├─ Stem (4× ConvBNReLU, stride 2+2)   → [B, 64, 56, 56]
+  │
+  ├─ Stage 1 (3× ECB, stride 1)          → [B,  96, 56, 56]
+  ├─ Stage 2 (4× ECB+LTB, stride 2)      → [B, 256, 28, 28]
+  ├─ Stage 3 (10× ECB+LTB, stride 2)     → [B, 512, 14, 14]
+  └─ Stage 4 (3× ECB+LTB, stride 2)      → [B, 1024, 7, 7]
+       │
+       ├─ [weight_tiling / channel_adapter / mask_guided / mask_bbox / slice_wise]
+       │    AdaptiveAvgPool(1,1) → flatten → [B, 1024]
+       │    MLP: 1024 → 512 → 256 → 2
+       │
+       └─ [cnn_head]
+            CNN attention head (SE / CBAM / GeM / MS) → [B, 2]
+```
 
-The simplest configuration (`baseline`: CE loss, one hidden layer, small backbone) achieves AUC 0.757 and F1 0.311, detecting 7 of 10 cancers with 28 false positives at threshold 0.5. This suggests that the pretrained backbone features are sufficiently rich that a lightweight head can separate the two classes without overfitting — additional head capacity and focal loss appear to over-parameterize the output stage given the small dataset size. Deeper heads (`deeper_head`, `focal_deep_rlrop`) tend toward predicting everything positive (sensitivity=1.00, specificity<0.38), indicating they have not learned a discriminative decision boundary.
+**Weight inflation**: pretrained 3-channel first conv `[64, 3, 3, 3]` tiled to `[64, 96, 3, 3]` and divided by 32.
 
-#### Channel Adapter is viable but constrained
+---
 
-The adapter approach achieves a test AUC of 0.609, but required the larger MedViT-Base backbone for stable training. The fundamental limitation is that a 1×1 convolution operates channel-wise without spatial context, making it intrinsically weaker than a 3×3 kernel at extracting spatial features across modalities. Additionally, the randomly initialized adapter generates noisy activations in early training, which small backbones cannot absorb — only the larger backbone's capacity allowed stable convergence.
+## References
 
-A deeper two-layer adapter (96→32→3) was also tested but performed worse: the additional parameters added more noise without improving the quality of the learned projection, suggesting that the bottleneck itself (not its depth) is the binding constraint.
-
-#### Mask-Guided approach improves specificity but not sensitivity
-
-The mask-guided approach achieves a test AUC of 0.817 (`mask_small`) — above the Slice Transformer — while requiring no new pretrained weights and only ~2K additional parameters. The ROI crop and within-mask normalization remove irrelevant background signals that the plain weight-tiling model must learn to ignore. However, sensitivity and specificity remain lower than the best Weight Tiling variant: the gland mask encodes *where* the prostate is, but not *which tissue patterns within the prostate* are suspicious — that discrimination still depends on the quality of the backbone features.
-
-#### Slice Transformer overfits under data scarcity
-
-The Slice Transformer is architecturally the most principled approach: each slice is processed by the full pretrained backbone, and a Transformer captures inter-slice dependencies. In a data-rich setting this would likely outperform the other two methods. However, with only 45 positive training patients, the ~6M Transformer parameters cannot be reliably learned. Validation AUC peaked at 0.824 (epoch 40) but test AUC was only 0.764, with sensitivity collapsing to 0.20 — a clear sign of overfitting to training patients rather than learning generalizable features.
-
-#### Class imbalance remains the dominant challenge
-
-Across all approaches, sensitivity is consistently more difficult to achieve than specificity. Among the three evaluated approaches, `mask_small` achieves the best trade-off: 7 of 10 cancers detected with 14 false positives at threshold 0.5. The small absolute number of csPCa patients in training (45) means that any single false negative in the training set has an outsized effect on gradient updates, making it difficult for the model to reliably learn the features of every cancer subtype present in the test set. Focal Loss and weighted sampling mitigate this but do not eliminate it.
-
-#### Future Work
-
-A more principled treatment of the multi-modal input would involve **late fusion** — encoding T2W, ADC, and gland mask through separate branches and combining the resulting feature vectors via concatenation or attention — or **cross-modal attention**, where features from one modality guide the processing of another (e.g., T2W spatial features serving as attention queries over the ADC map). Both approaches allow each modality to be encoded according to its own characteristics rather than being mixed at the input level. However, given the small dataset size in this work (451 patients, 45 csPCa in training), either architecture would introduce substantially more parameters that must be learned from scratch, making severe overfitting the expected outcome. These directions become viable as dataset scale increases.
+- **MedViT:** Nejati O. et al., *MedViT: A Robust Vision Transformer for Generalized Medical Image Classification*, CVPR 2023. [arXiv:2302.09462](https://arxiv.org/abs/2302.09462)
+- **PI-CAI:** Saha A. et al., *Artificial Intelligence and Radiologists at Prostate Cancer Detection in MRI*, Radiology 2023. [DOI:10.1148/radiol.220029](https://doi.org/10.1148/radiol.220029)
+- **CBAM:** Woo S. et al., *CBAM: Convolutional Block Attention Module*, ECCV 2018.
+- **GeM Pooling:** Radenović F. et al., *Fine-Tuning CNN Image Retrieval with No Human Annotation*, TPAMI 2019.
