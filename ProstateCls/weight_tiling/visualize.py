@@ -337,6 +337,43 @@ def main(args):
             plt.tight_layout()
             plt.savefig(os.path.join(gradcam_dir, f'gradcam_{pid}.png'), dpi=200, bbox_inches='tight')
             plt.close()
+            if lbl == 1:
+                from PIL import Image as _PIL_Image
+                import io as _io
+                start_z = vz - ti
+                gif_frames = []
+                for si in range(args.n_slices):
+                    vz_i = start_z + si
+                    t2w_i = tensor[si * 3].numpy()
+                    tumor_i = load_tumor_slice(pid, vz_i, target_size=t2w_i.shape[0])
+                    fig_g, ax_g = plt.subplots(1, 3, figsize=(13, 4))
+                    ax_g[0].imshow(t2w_i, cmap='gray')
+                    ax_g[0].set_title(f'T2W  {si+1}/{args.n_slices}  z={vz_i}')
+                    ax_g[0].axis('off')
+                    ax_g[1].imshow(t2w_i, cmap='gray')
+                    ax_g[1].imshow(heatmap, cmap='jet', alpha=0.45, vmin=0, vmax=1)
+                    ax_g[1].set_title('Grad-CAM Overlay')
+                    ax_g[1].axis('off')
+                    ax_g[2].imshow(t2w_i, cmap='gray')
+                    if tumor_i.max() > 0:
+                        ax_g[2].imshow(tumor_i, cmap='Reds', alpha=0.4, vmin=0, vmax=1)
+                        ax_g[2].contour(tumor_i, levels=[0.5], colors='red', linewidths=1.5)
+                    ax_g[2].set_title('Tumor Mask' if tumor_i.max() > 0 else 'No Tumor')
+                    ax_g[2].axis('off')
+                    fig_g.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})',
+                                   fontsize=11, color='green' if true==pred else 'red', fontweight='bold')
+                    plt.tight_layout()
+                    buf = _io.BytesIO()
+                    fig_g.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+                    buf.seek(0)
+                    gif_frames.append(_PIL_Image.open(buf).copy())
+                    buf.close()
+                    plt.close(fig_g)
+                gif_frames[0].save(
+                    os.path.join(gradcam_dir, f'gradcam_{pid}.gif'),
+                    save_all=True, append_images=gif_frames[1:],
+                    duration=250, loop=0
+                )
         gradcam.remove()
         print(f"Grad-CAM saved to {gradcam_dir}/")
 

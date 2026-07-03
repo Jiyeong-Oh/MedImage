@@ -117,7 +117,7 @@ Best test set result per method (threshold = 0.5, test n = 170, csPCa = 27):
 
 ## Grad-CAM: Correctly Detected csPCa Cases per Method
 
-Grad-CAM activations highlight which spatial regions most influenced the decision. Each image shows four panels: **T2W · Heatmap · Overlay · Tumor mask**. All patients shown are True Positives (csPCa correctly predicted as csPCa) at threshold = 0.5.
+Each animation cycles through all 32 axial slices showing **T2W · Grad-CAM overlay · Tumor mask** (red contour). All patients shown are True Positives at threshold = 0.5. Depth-as-channel methods (wt/ca/mg/mb/cnn) use the aggregate spatial heatmap; slice_wise recomputes Grad-CAM independently per slice.
 
 ---
 
@@ -127,9 +127,14 @@ Grad-CAM activations highlight which spatial regions most influenced the decisio
 |----------------|--------|
 | ![](ProstateCls/weight_tiling/figures/wt_warmup/learning_curve.png) | ![](ProstateCls/weight_tiling/figures/wt_warmup/roc_pr_curve.png) |
 
-| Patient 10019 | Patient 10085 | Patient 10220 |
-|---------------|---------------|---------------|
-| ![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10019_1000019.png) | ![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10220_1000224.png) |
+**Patient 10019**
+![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10019_1000019.gif)
+
+**Patient 10085**
+![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10085_1000085.gif)
+
+**Patient 10220**
+![](ProstateCls/weight_tiling/figures/wt_warmup/gradcam/gradcam_10220_1000224.gif)
 
 ---
 
@@ -139,9 +144,14 @@ Grad-CAM activations highlight which spatial regions most influenced the decisio
 |----------------|--------|
 | ![](ProstateCls/channel_adapter/figures/adapter_lrbal/learning_curve.png) | ![](ProstateCls/channel_adapter/figures/adapter_lrbal/roc_pr_curve.png) |
 
-| Patient 10085 | Patient 10220 | Patient 10626 |
-|---------------|---------------|---------------|
-| ![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10220_1000224.png) | ![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10626_1000640.png) |
+**Patient 10085**
+![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10085_1000085.gif)
+
+**Patient 10220**
+![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10220_1000224.gif)
+
+**Patient 10626**
+![](ProstateCls/channel_adapter/figures/adapter_lrbal/gradcam/gradcam_10626_1000640.gif)
 
 ---
 
@@ -151,9 +161,14 @@ Grad-CAM activations highlight which spatial regions most influenced the decisio
 |----------------|--------|-----------------|
 | ![](ProstateCls/mask_guided/figures/mask_noflip/learning_curve.png) | ![](ProstateCls/mask_guided/figures/mask_noflip/roc_pr_curve.png) | ![](ProstateCls/mask_guided/figures/mask_noflip/confusion_matrix.png) |
 
-| Patient 10085 | Patient 10220 | Patient 10626 |
-|---------------|---------------|---------------|
-| ![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10220_1000224.png) | ![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10626_1000640.png) |
+**Patient 10085**
+![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10085_1000085.gif)
+
+**Patient 10220**
+![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10220_1000224.gif)
+
+**Patient 10626**
+![](ProstateCls/mask_guided/figures/mask_noflip/gradcam/gradcam_10626_1000640.gif)
 
 ---
 
@@ -163,9 +178,14 @@ Grad-CAM activations highlight which spatial regions most influenced the decisio
 |----------------|--------|
 | ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/learning_curve.png) | ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/roc_pr_curve.png) |
 
-| Patient 10085 | Patient 10442 | Patient 10626 |
-|---------------|---------------|---------------|
-| ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10442_1000450.png) | ![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10626_1000640.png) |
+**Patient 10085**
+![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10085_1000085.gif)
+
+**Patient 10442**
+![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10442_1000450.gif)
+
+**Patient 10626**
+![](ProstateCls/mask_bbox/figures/bbox_cw_lo/gradcam/gradcam_10626_1000640.gif)
 
 ---
 
@@ -181,13 +201,20 @@ Grad-CAM is not applicable to the slice transformer architecture.
 
 ### Slice Wise MIL — `slice_wise_cosine` (21 / 27 TP)
 
+Per-slice Grad-CAM: each frame shows the heatmap recomputed independently for that slice through the shared MedViT backbone.
+
 | Learning Curve | ROC/PR |
 |----------------|--------|
 | ![](ProstateCls/slice_wise/figures/slice_wise_cosine/learning_curve.png) | ![](ProstateCls/slice_wise/figures/slice_wise_cosine/roc_pr_curve.png) |
 
-| Patient 10085 | Patient 10220 | Patient 10626 |
-|---------------|---------------|---------------|
-| ![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10220_1000224.png) | ![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10626_1000640.png) |
+**Patient 10085**
+![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10085_1000085.gif)
+
+**Patient 10220**
+![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10220_1000224.gif)
+
+**Patient 10626**
+![](ProstateCls/slice_wise/figures/slice_wise_cosine/gradcam/gradcam_10626_1000640.gif)
 
 ---
 
@@ -199,9 +226,14 @@ CNN attention head on `[B, 1024, 7, 7]` spatial feature map — CBAM (SE + 7×7 
 |----------------|--------|
 | ![](ProstateCls/cnn_head/figures/cnn_cbam/learning_curve.png) | ![](ProstateCls/cnn_head/figures/cnn_cbam/roc_pr_curve.png) |
 
-| Patient 10085 | Patient 10220 | Patient 10626 |
-|---------------|---------------|---------------|
-| ![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10085_1000085.png) | ![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10220_1000224.png) | ![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10626_1000640.png) |
+**Patient 10085**
+![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10085_1000085.gif)
+
+**Patient 10220**
+![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10220_1000224.gif)
+
+**Patient 10626**
+![](ProstateCls/cnn_head/figures/cnn_cbam/gradcam/gradcam_10626_1000640.gif)
 
 ---
 

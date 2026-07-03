@@ -1,14 +1,14 @@
 """
-Visualization for mask-guided PI-CAI classification results.
+Visualization for cnn_head PI-CAI classification results.
 Usage:
-    python visualize.py --log logs/<job>.out --ckpt output/<run>/best.pth
+    python visualize.py --log logs/<job>.out --ckpt output/<run>/best.pth --cnn-head cbam
 
 Generates in --output-dir:
-  learning_curve.png / .svg
-  roc_pr_curve.png  / .svg
+  learning_curve.png
+  roc_pr_curve.png
   confusion_matrix.png
   performance_table.txt
-  gradcam/              — Grad-CAM overlays on T2W center slice
+  gradcam/
 """
 import argparse
 import os
@@ -25,8 +25,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import (roc_auc_score, roc_curve, f1_score, confusion_matrix,
                              average_precision_score, precision_recall_curve)
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dataset import (MaskGuidedDataset, load_labels, _gland_centroid_2d,
+from dataset import (PatientVolumeDataset, load_labels, _gland_centroid_2d,
                      _fov_crop_and_resize, _resample_inplane, TARGET_SPACING)
 from model import build_model
 
@@ -34,7 +35,6 @@ DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
 
 
 def get_best_display_slice(pid, n_slices=32):
-    """Return (tensor_idx, volume_z) for the z with the most tumor area within the sampled range."""
     t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
     tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
     D     = nib.load(t2w_path).shape[2]
@@ -53,7 +53,6 @@ def get_best_display_slice(pid, n_slices=32):
 
 
 def load_tumor_slice(pid, volume_z, target_size=224):
-    """Load tumor mask at volume_z with same resample+FOV crop as MaskGuidedDataset."""
     t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
     tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
     gland_path = os.path.join(DATA_ROOT, pid, f'{pid}_gland.nii.gz')
@@ -85,34 +84,32 @@ def parse_log(logfile):
 
 
 def get_probs(model, records, device, n_slices):
-    ds = MaskGuidedDataset(records, augment=False, n_slices=n_slices)
+    ds = PatientVolumeDataset(records, augment=False, n_slices=n_slices)
     lbls, probs, pids = [], [], []
     model.eval()
     with torch.no_grad():
         for i in range(len(ds)):
-            img, mask, lbl, pid = ds[i]
-            p = torch.softmax(
-                model(img.unsqueeze(0).to(device), mask.unsqueeze(0).to(device)),
-                dim=1)[0, 1].item()
+            img, lbl, pid = ds[i]
+            p = torch.softmax(model(img.unsqueeze(0).to(device)), dim=1)[0, 1].item()
             probs.append(p); lbls.append(int(lbl)); pids.append(pid)
     return np.array(lbls), np.array(probs), pids
 
 
 class GradCAM:
+    """Hooks on backbone.norm — the [B,1024,7,7] spatial feature map."""
     def __init__(self, model):
         self.model     = model
         self.features  = None
         self.gradients = None
-        self._fhook = model.norm.register_forward_hook(
+        self._fhook = model.backbone.norm.register_forward_hook(
             lambda m, i, o: setattr(self, 'features', o.detach()))
-        self._bhook = model.norm.register_full_backward_hook(
+        self._bhook = model.backbone.norm.register_full_backward_hook(
             lambda m, gi, go: setattr(self, 'gradients', go[0].detach()))
 
     def __call__(self, tensor, class_idx=1):
         self.model.eval()
         self.model.zero_grad()
-        mask = tensor[2::3].unsqueeze(0)
-        out  = self.model(tensor.unsqueeze(0), mask)
+        out = self.model(tensor.unsqueeze(0))
         out[0, class_idx].backward()
         weights = self.gradients.mean(dim=(2, 3), keepdim=True)
         cam = F.relu((weights * self.features).sum(dim=1, keepdim=True))
@@ -130,55 +127,44 @@ class GradCAM:
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Device: {device}")
+    print(f"Device: {device}  head: {args.cnn_head}")
     os.makedirs(args.output_dir, exist_ok=True)
     job_id = os.path.basename(args.log).replace('.out', '')
 
-    # ── 1. Learning curve ─────────────────────────────────────────────────────
+    # 1. Learning curve
     epochs, losses, val_aucs = parse_log(args.log)
     best_idx = np.argmax(val_aucs)
-    best_ep, best_auc = epochs[best_idx], val_aucs[best_idx]
-    print(f"Parsed {len(epochs)} epochs  |  Best val AUC: {best_auc:.4f} @ ep{best_ep}")
+    best_auc = val_aucs[best_idx]
+    best_ep  = epochs[best_idx]
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    fig.suptitle(f'Job {job_id} — Mask-Guided (backbone 1e-5 / head 3e-4)', fontsize=13)
-    ax = axes[0]
-    ax.plot(epochs, losses, color='steelblue', lw=1, alpha=0.7, label='Train loss')
-    if len(losses) >= 5:
-        smooth = np.convolve(losses, np.ones(5)/5, mode='valid')
-        ax.plot(epochs[4:], smooth, color='navy', lw=2, label='5-ep mean')
-    ax.set_xlabel('Epoch'); ax.set_ylabel('Loss')
-    ax.set_title('Training Loss'); ax.legend(); ax.grid(True, alpha=0.3)
-
-    ax = axes[1]
-    ax.plot(epochs, val_aucs, color='tomato', lw=1, alpha=0.7, label='Val AUC-ROC')
-    ax.axhline(best_auc, color='gray', ls='--', alpha=0.5)
-    ax.scatter([best_ep], [best_auc], color='red', s=100, zorder=5,
-               label=f'Best: {best_auc:.4f} @ ep{best_ep}')
-    ax.set_xlabel('Epoch'); ax.set_ylabel('AUC-ROC')
-    ax.set_title('Validation AUC-ROC'); ax.legend(); ax.grid(True, alpha=0.3)
-    ax.set_ylim(0.5, 1.0)
+    fig, ax1 = plt.subplots(figsize=(10, 4))
+    ax2 = ax1.twinx()
+    ax1.plot(epochs, losses, 'b-', alpha=0.7, label='Train loss')
+    ax2.plot(epochs, val_aucs, 'r-', label='Val AUC')
+    ax2.axvline(best_ep, color='r', linestyle='--', alpha=0.5)
+    ax2.scatter([best_ep], [best_auc], color='r', zorder=5,
+                label=f'Best AUC={best_auc:.4f} @ ep{best_ep}')
+    ax1.set_xlabel('Epoch'); ax1.set_ylabel('Loss', color='b'); ax2.set_ylabel('AUC', color='r')
+    lines = ax1.get_lines() + ax2.get_lines()
+    ax1.legend(lines, [l.get_label() for l in lines], loc='upper right')
+    plt.title(f'Learning Curve — {job_id}  [{args.cnn_head.upper()} head]')
     plt.tight_layout()
     p = os.path.join(args.output_dir, 'learning_curve.png')
-    plt.savefig(p, dpi=300, bbox_inches='tight')
-    plt.savefig(p.replace('.png', '.svg'), bbox_inches='tight')
-    plt.close(); print(f"Saved: {p}")
+    plt.savefig(p, dpi=300, bbox_inches='tight'); plt.close(); print(f"Saved: {p}")
 
-    # ── 2. Data splits ────────────────────────────────────────────────────────
+    # 2. Load model + splits
     records = load_labels()
     labels  = np.array([r[1] for r in records])
-    tv, test_r, ltv, _ = train_test_split(
+    train_val, test_r, lbl_tv, _ = train_test_split(
         records, labels, test_size=args.test_size, stratify=labels, random_state=args.seed)
-    _, val_r, _, _ = train_test_split(
-        tv, ltv, test_size=args.val_size/(1-args.test_size),
-        stratify=ltv, random_state=args.seed)
+    relative_val = args.val_size / (1.0 - args.test_size)
+    val_r, _, _, _ = train_test_split(
+        train_val, lbl_tv, test_size=relative_val, stratify=lbl_tv, random_state=args.seed)
 
-    # ── 3. Load model and run inference ───────────────────────────────────────
     model = build_model(num_classes=2, pretrained=False, n_slices=args.n_slices,
-                        head_depth=args.head_depth, backbone=args.backbone)
+                        head_type=args.cnn_head, backbone=args.backbone)
     model.load_state_dict(torch.load(args.ckpt, map_location=device, weights_only=False))
     model = model.to(device)
-    print(f"Loaded: {args.ckpt}")
 
     val_lbl,  val_prob,  _    = get_probs(model, val_r,  device, args.n_slices)
     test_lbl, test_prob, pids = get_probs(model, test_r, device, args.n_slices)
@@ -187,70 +173,61 @@ def main(args):
     test_auc = roc_auc_score(test_lbl, test_prob)
     val_ap   = average_precision_score(val_lbl,  val_prob)
     test_ap  = average_precision_score(test_lbl, test_prob)
-    print(f"Val  AUC={val_auc:.4f}  AP={val_ap:.4f}")
-    print(f"Test AUC={test_auc:.4f}  AP={test_ap:.4f}")
+    print(f"Val AUC={val_auc:.4f}  Test AUC={test_auc:.4f}")
 
-    # ── 4. ROC + PR curve ─────────────────────────────────────────────────────
+    # 3. ROC + PR
     val_fpr,  val_tpr,  _        = roc_curve(val_lbl,  val_prob)
     test_fpr, test_tpr, test_thr = roc_curve(test_lbl, test_prob)
     j_idx  = np.argmax(test_tpr - test_fpr)
     best_t = float(test_thr[j_idx])
 
-    preds = (test_prob >= best_t).astype(int)
-    tn, fp, fn, tp = confusion_matrix(test_lbl, preds, labels=[0,1]).ravel()
-    sens = tp / (tp + fn) if (tp + fn) > 0 else 0
-    spec = tn / (tn + fp) if (tn + fp) > 0 else 0
-    f1   = f1_score(test_lbl, preds, pos_label=1, zero_division=0)
-    prevalence = test_lbl.mean()
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    ax1.plot(val_fpr,  val_tpr,  'b-', lw=2, label=f'Val  AUC={val_auc:.3f}')
+    ax1.plot(test_fpr, test_tpr, 'r-', lw=2, label=f'Test AUC={test_auc:.3f}')
+    ax1.scatter([test_fpr[j_idx]], [test_tpr[j_idx]], color='red', s=100, zorder=5,
+                label=f'Youden thr={best_t:.2f}')
+    ax1.plot([0,1],[0,1],'k--',alpha=0.4); ax1.set_xlabel('FPR'); ax1.set_ylabel('TPR')
+    ax1.set_title(f'ROC [{args.cnn_head.upper()}]'); ax1.legend()
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
-    fig.suptitle(f'Job {job_id} — best ckpt ep{best_ep}', fontsize=13)
-    ax = axes[0]
-    ax.plot(val_fpr,  val_tpr,  'b-', lw=2.5, label=f'Val  AUC={val_auc:.3f}')
-    ax.plot(test_fpr, test_tpr, 'r-', lw=2.5, label=f'Test AUC={test_auc:.3f}')
-    ax.scatter([test_fpr[j_idx]], [test_tpr[j_idx]], color='red', s=120, zorder=5,
-               label=f'Youden thr={best_t:.2f}\nSens={sens:.2f} Spec={spec:.2f}')
-    ax.plot([0,1],[0,1],'k--', alpha=0.35)
-    ax.set_xlabel('FPR'); ax.set_ylabel('TPR')
-    ax.set_title('ROC Curve'); ax.legend(loc='lower right'); ax.grid(True, alpha=0.3)
-    ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
-
-    val_prec, val_rec, _ = precision_recall_curve(val_lbl, val_prob)
-    test_prec, test_rec, _ = precision_recall_curve(test_lbl, test_prob)
-    ax = axes[1]
-    ax.plot(val_rec,  val_prec,  'b-', lw=2.5, label=f'Val  AP={val_ap:.3f}')
-    ax.plot(test_rec, test_prec, 'r-', lw=2.5, label=f'Test AP={test_ap:.3f}')
-    ax.axhline(prevalence, color='k', ls='--', alpha=0.35, label=f'Random (prev={prevalence:.2f})')
-    ax.set_xlabel('Recall'); ax.set_ylabel('Precision')
-    ax.set_title('Precision-Recall Curve'); ax.legend(loc='upper right'); ax.grid(True, alpha=0.3)
-    ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
+    vp, vr, _ = precision_recall_curve(val_lbl,  val_prob)
+    tp, tr, _ = precision_recall_curve(test_lbl, test_prob)
+    ax2.plot(vr, vp, 'b-', lw=2, label=f'Val  AP={val_ap:.3f}')
+    ax2.plot(tr, tp, 'r-', lw=2, label=f'Test AP={test_ap:.3f}')
+    ax2.set_xlabel('Recall'); ax2.set_ylabel('Precision')
+    ax2.set_title('Precision-Recall'); ax2.legend()
     plt.tight_layout()
     p = os.path.join(args.output_dir, 'roc_pr_curve.png')
-    plt.savefig(p, dpi=300, bbox_inches='tight')
-    plt.savefig(p.replace('.png', '.svg'), bbox_inches='tight')
-    plt.close(); print(f"Saved: {p}")
+    plt.savefig(p, dpi=300, bbox_inches='tight'); plt.close(); print(f"Saved: {p}")
 
-    # ── 5. Confusion matrix ───────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(4, 4))
-    cm_arr = np.array([[tn, fp], [fn, tp]])
+    # 4. Confusion matrix
+    preds = (test_prob >= 0.5).astype(int)
+    tn, fp, fn, tp_n = confusion_matrix(test_lbl, preds, labels=[0,1]).ravel()
+    sens = tp_n/(tp_n+fn) if (tp_n+fn)>0 else 0
+    spec = tn/(tn+fp)     if (tn+fp)>0   else 0
+    f1   = f1_score(test_lbl, preds, pos_label=1, zero_division=0)
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+    cm_arr = np.array([[tn, fp], [fn, tp_n]])
     im = ax.imshow(cm_arr, cmap='Blues')
     ax.set_xticks([0,1]); ax.set_yticks([0,1])
-    ax.set_xticklabels(['Pred ciPCa','Pred csPCa'])
-    ax.set_yticklabels(['True ciPCa','True csPCa'])
+    ax.set_xticklabels(['Pred ciPCa','Pred csPCa']); ax.set_yticklabels(['GT ciPCa','GT csPCa'])
     for i in range(2):
         for j in range(2):
             ax.text(j, i, str(cm_arr[i,j]), ha='center', va='center',
-                    fontsize=18, color='white' if cm_arr[i,j] > cm_arr.max()/2 else 'black')
-    ax.set_title(f'Confusion Matrix (thr={best_t:.2f})')
+                    color='white' if cm_arr[i,j] > cm_arr.max()/2 else 'black', fontsize=14)
+    ax.set_title(f'Confusion Matrix (thr=0.5)\n'
+                 f'Sens={sens:.3f}  Spec={spec:.3f}  F1={f1:.3f}  AUC={test_auc:.4f}')
     plt.colorbar(im, ax=ax); plt.tight_layout()
     p = os.path.join(args.output_dir, 'confusion_matrix.png')
     plt.savefig(p, dpi=300, bbox_inches='tight'); plt.close(); print(f"Saved: {p}")
 
-    # ── 6. Performance table ──────────────────────────────────────────────────
+    # 5. Performance table
     thresholds = sorted(set([0.2, 0.3, 0.4, 0.5, round(best_t, 2), 0.6, 0.7]))
-    lines = [f"=== {job_id} ===",
+    lines = [f"=== {job_id} [{args.cnn_head.upper()} head] ===",
              f"Best val AUC: {best_auc:.4f} @ epoch {best_ep}",
-             f"Test AUC:     {test_auc:.4f}  AP={test_ap:.4f}\n",
+             f"Val  AP:      {val_ap:.4f}",
+             f"Test AUC:     {test_auc:.4f}",
+             f"Test AP:      {test_ap:.4f}\n",
              f"{'Threshold':>10} {'Sensitivity':>12} {'Specificity':>12} "
              f"{'Precision':>10} {'F1':>8} {'TP':>4} {'FP':>4} {'TN':>4} {'FN':>4}",
              "-"*75]
@@ -276,15 +253,15 @@ def main(args):
     p = os.path.join(args.output_dir, 'performance_table.txt')
     with open(p, 'w') as f: f.write(txt); print(f"Saved: {p}")
 
-    # ── 7. Grad-CAM ───────────────────────────────────────────────────────────
+    # 6. Grad-CAM
     if args.gradcam:
         gradcam_dir = os.path.join(args.output_dir, 'gradcam')
         os.makedirs(gradcam_dir, exist_ok=True)
-        test_ds  = MaskGuidedDataset(test_r, augment=False, n_slices=args.n_slices)
+        test_ds = PatientVolumeDataset(test_r, augment=False, n_slices=args.n_slices)
         gradcam = GradCAM(model)
         for i, (pid, lbl, prob) in enumerate(zip(pids, test_lbl, test_prob)):
-            tensor, _, _, _ = test_ds[i]
-            ti, vz  = get_best_display_slice(pid, n_slices=args.n_slices)
+            tensor, _, _ = test_ds[i]
+            ti, vz = get_best_display_slice(pid, n_slices=args.n_slices)
             heatmap = gradcam(tensor.to(device))
             t2w     = tensor[ti * 3].numpy()
             tumor   = load_tumor_slice(pid, vz, target_size=t2w.shape[0])
@@ -293,7 +270,7 @@ def main(args):
             slice_note = f'z={vz}' if tumor.max() > 0 else f'z={vz} (no tumor)'
 
             fig, axes = plt.subplots(1, 4, figsize=(17, 4))
-            axes[0].imshow(t2w, cmap='gray');  axes[0].set_title(f'T2W (ROI, {slice_note})'); axes[0].axis('off')
+            axes[0].imshow(t2w, cmap='gray'); axes[0].set_title(f'T2W ({slice_note})'); axes[0].axis('off')
             axes[1].imshow(heatmap, cmap='jet', vmin=0, vmax=1); axes[1].set_title('Grad-CAM'); axes[1].axis('off')
             axes[2].imshow(t2w, cmap='gray')
             axes[2].imshow(heatmap, cmap='jet', alpha=0.5, vmin=0, vmax=1)
@@ -303,7 +280,7 @@ def main(args):
                 axes[3].imshow(tumor, cmap='Reds', alpha=0.4, vmin=0, vmax=1)
                 axes[3].contour(tumor, levels=[0.5], colors='red', linewidths=1.5)
             axes[3].set_title('Tumor Mask' if tumor.max() > 0 else 'Tumor Mask (none)'); axes[3].axis('off')
-            fig.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})',
+            fig.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})  [{args.cnn_head.upper()}]',
                          fontsize=12, color='green' if true==pred else 'red', fontweight='bold')
             plt.tight_layout()
             plt.savefig(os.path.join(gradcam_dir, f'gradcam_{pid}.png'), dpi=200, bbox_inches='tight')
@@ -331,7 +308,7 @@ def main(args):
                         ax_g[2].contour(tumor_i, levels=[0.5], colors='red', linewidths=1.5)
                     ax_g[2].set_title('Tumor Mask' if tumor_i.max() > 0 else 'No Tumor')
                     ax_g[2].axis('off')
-                    fig_g.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})',
+                    fig_g.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})  [{args.cnn_head.upper()}]',
                                    fontsize=11, color='green' if true==pred else 'red', fontweight='bold')
                     plt.tight_layout()
                     buf = _io.BytesIO()
@@ -353,16 +330,17 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--log',        type=str,   required=True)
-    parser.add_argument('--ckpt',       type=str,   required=True)
-    parser.add_argument('--output-dir', type=str,   default='figures/run')
-    parser.add_argument('--n-slices',   type=int,   default=32)
-    parser.add_argument('--seed',       type=int,   default=42)
+    parser.add_argument('--log',        type=str, required=True)
+    parser.add_argument('--ckpt',       type=str, required=True)
+    parser.add_argument('--output-dir', type=str, default='./figures/run')
+    parser.add_argument('--cnn-head',   type=str, default='cbam',
+                        choices=['se', 'cbam', 'gem', 'ms'])
+    parser.add_argument('--backbone',   type=str, default='small',
+                        choices=['small', 'base', 'large'])
+    parser.add_argument('--n-slices',   type=int, default=32)
+    parser.add_argument('--seed',       type=int, default=42)
     parser.add_argument('--val-size',   type=float, default=0.15)
     parser.add_argument('--test-size',  type=float, default=0.15)
-    parser.add_argument('--head-depth', type=int,   default=2)
-    parser.add_argument('--backbone',   type=str,   default='small',
-                        choices=['small', 'base', 'large'])
+    parser.add_argument('--gradcam',    action='store_true', default=True)
     parser.add_argument('--no-gradcam', dest='gradcam', action='store_false')
-    parser.set_defaults(gradcam=True)
     main(parser.parse_args())
