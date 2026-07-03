@@ -134,11 +134,13 @@ def train_model(train_records, val_records, args, device, nw):
     train_labels_np = np.array([r[1] for r in train_records])
     class_weights = compute_class_weights(train_labels_np, device, args.cspca_weight)
     if args.focal_gamma > 0:
-        criterion = FocalLoss(weight=class_weights, gamma=args.focal_gamma)
-        print(f"  Loss: FocalLoss(gamma={args.focal_gamma})")
+        criterion = FocalLoss(weight=class_weights, gamma=args.focal_gamma,
+                              label_smoothing=args.label_smoothing)
+        print(f"  Loss: FocalLoss(gamma={args.focal_gamma}, ls={args.label_smoothing})")
     else:
-        criterion = nn.CrossEntropyLoss(weight=class_weights)
-        print(f"  Loss: CrossEntropyLoss")
+        criterion = nn.CrossEntropyLoss(weight=class_weights,
+                                        label_smoothing=args.label_smoothing)
+        print(f"  Loss: CrossEntropyLoss(ls={args.label_smoothing})")
 
     ckpt_path = os.path.join(args.output_dir, 'best.pth')
     best_auc, best_epoch, patience_count = 0.0, 0, 0

@@ -156,7 +156,11 @@ def train_model(train_records, val_records, args, device, nw):
             optimizer.zero_grad()
             logits        = model(imgs)                          # [B, N, 2]
             patient_logit = logits[:, :, 1].max(dim=1)[0]       # [B]
-            loss = criterion(patient_logit, lbls)
+            if args.label_smoothing > 0:
+                lbls_ls = lbls * (1 - args.label_smoothing) + args.label_smoothing * 0.5
+            else:
+                lbls_ls = lbls
+            loss = criterion(patient_logit, lbls_ls)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -294,6 +298,8 @@ if __name__ == '__main__':
     parser.add_argument('--test-size',    type=float, default=0.15)
     parser.add_argument('--focal-gamma',   type=float, default=0.0,
                         help='Binary focal loss gamma. 0=BCEWithLogitsLoss, >0=BinaryFocalLoss')
+    parser.add_argument('--label-smoothing', type=float, default=0.0,
+                        help='Label smoothing epsilon for BCE soft targets (0=disabled)')
     parser.add_argument('--warmup-epochs', type=int,   default=0)
     parser.add_argument('--freeze-epochs', type=int,   default=0)
     parser.add_argument('--scheduler',    type=str,   default='rlrop',

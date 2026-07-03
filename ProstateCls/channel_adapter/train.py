@@ -32,19 +32,20 @@ from model import build_model
 
 
 class FocalLoss(nn.Module):
-    """Multi-class focal loss: FL = -α_t * (1 - p_t)^γ * log(p_t)"""
-    def __init__(self, weight=None, gamma=2.0):
+    """Multi-class focal loss with optional label smoothing."""
+    def __init__(self, weight=None, gamma=2.0, label_smoothing=0.0):
         super().__init__()
         self.weight = weight
         self.gamma  = gamma
+        self.label_smoothing = label_smoothing
 
     def forward(self, logits, targets):
-        log_p = F.log_softmax(logits, dim=1)
-        p_t   = torch.exp(log_p).gather(1, targets.unsqueeze(1)).squeeze(1)
-        loss  = -(1 - p_t) ** self.gamma * log_p.gather(1, targets.unsqueeze(1)).squeeze(1)
-        if self.weight is not None:
-            loss = self.weight[targets] * loss
-        return loss.mean()
+        log_p   = F.log_softmax(logits, dim=1)
+        p_t     = torch.exp(log_p).gather(1, targets.unsqueeze(1)).squeeze(1)
+        focal_w = (1 - p_t) ** self.gamma
+        loss_ce = F.cross_entropy(logits, targets, weight=self.weight,
+                                  label_smoothing=self.label_smoothing, reduction='none')
+        return (focal_w * loss_ce).mean()
 
 
 def set_seed(seed):
@@ -144,11 +145,13 @@ def train_model(train_records, val_records, args, device, nw):
     train_labels_np = np.array([r[1] for r in train_records])
     class_weights = compute_class_weights(train_labels_np, device, args.cspca_weight)
     if args.focal_gamma > 0:
-        criterion = FocalLoss(weight=class_weights, gamma=args.focal_gamma)
-        print(f"  Loss: FocalLoss(gamma={args.focal_gamma})")
+        criterion = FocalLoss(weight=class_weights, gamma=args.focal_gamma,
+                              label_smoothing=args.label_smoothing)
+        print(f"  Loss: FocalLoss(gamma={args.focal_gamma}, ls={args.label_smoothing})")
     else:
-        criterion = nn.CrossEntropyLoss(weight=class_weights)
-        print(f"  Loss: CrossEntropyLoss")
+        criterion = nn.CrossEntropyLoss(weight=class_weights,
+                                        label_smoothing=args.label_smoothing)
+        print(f"  Loss: CrossEntropyLoss(ls={args.label_smoothing})")
     ckpt_path       = os.path.join(args.output_dir, 'best.pth')
     best_auc, best_epoch, patience_count = 0.0, 0, 0
 
@@ -333,6 +336,8 @@ if __name__ == '__main__':
                         help='csPCa loss weight. 0=auto (inverse freq ≈3.5)')
     parser.add_argument('--focal-gamma',  type=float, default=0.0,
                         help='Focal loss gamma. 0=CrossEntropyLoss, >0=FocalLoss (e.g. 2.0)')
+    parser.add_argument('--label-smoothing', type=float, default=0.0,
+                        help='Label smoothing epsilon (0=disabled, e.g. 0.1)')
     parser.add_argument('--head-depth',   type=int,   default=2,
                         help='Head MLP layers: 2=1024→512→256→2, 3=→128→2')
     parser.add_argument('--backbone',     type=str,   default='small',
