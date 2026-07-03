@@ -18,7 +18,8 @@ if 'prostatecls_dataset' not in sys.modules:
     sys.modules['prostatecls_dataset'] = _mod
     _spec.loader.exec_module(_mod)
 from prostatecls_dataset import (DATA_ROOT, load_labels, load_patient, slice_to_tensor,
-                                  augment_volume_tensor, augment_volume_tensor_strong)
+                                  augment_volume_tensor, augment_volume_tensor_strong,
+                                  augment_volume_tensor_scale)
 
 
 class SliceWiseDataset(Dataset):
@@ -27,11 +28,12 @@ class SliceWiseDataset(Dataset):
     Augmentation applied on interleaved [N*3, H, W] so spatial transforms are
     consistent across slices, then reshaped back to [N, 3, H, W].
     """
-    def __init__(self, records, augment=False, aug_strong=False, aug_t2w_only=False,
+    def __init__(self, records, augment=False, aug_strong=False, aug_scale=False, aug_t2w_only=False,
                  no_hflip=False, gland_z_center=False, n_slices=32,
                  input_size=224, data_root=DATA_ROOT):
         self.augment        = augment
         self.aug_strong     = aug_strong
+        self.aug_scale      = aug_scale
         self.aug_t2w_only   = aug_t2w_only
         self.no_hflip       = no_hflip
         self.gland_z_center = gland_z_center
@@ -69,6 +71,8 @@ class SliceWiseDataset(Dataset):
         if self.aug_strong:
             tensor = augment_volume_tensor_strong(tensor, t2w_int_only=self.aug_t2w_only,
                                                   no_hflip=self.no_hflip)
+        elif self.aug_scale:
+            tensor = augment_volume_tensor_scale(tensor)
         elif self.augment:
             tensor = augment_volume_tensor(tensor, t2w_int_only=self.aug_t2w_only,
                                            no_hflip=self.no_hflip)

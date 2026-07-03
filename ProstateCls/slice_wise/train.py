@@ -80,7 +80,8 @@ def train_model(train_records, val_records, args, device, nw):
     print(f"Train: {len(train_records)} (csPCa={cs_tr}, ciPCa={len(train_records)-cs_tr})")
     print(f"Val:   {len(val_records)}   (csPCa={cs_val}, ciPCa={len(val_records)-cs_val})")
 
-    train_ds = SliceWiseDataset(train_records, augment=not args.aug_strong,
+    train_ds = SliceWiseDataset(train_records, augment=not args.aug_strong and not args.aug_scale,
+        aug_scale=args.aug_scale,
                                 aug_strong=args.aug_strong, aug_t2w_only=args.aug_t2w_only,
                                 no_hflip=not args.hflip, gland_z_center=args.gland_z_center,
                                 n_slices=args.n_slices)
@@ -288,6 +289,8 @@ if __name__ == '__main__':
     parser.add_argument('--backbone',     type=str,   default='small',
                         choices=['small', 'base', 'large'])
     parser.add_argument('--aug-strong',   action='store_true')
+    parser.add_argument('--aug-scale',    action='store_true',
+                        help='Scale-only augmentation: zoom in/out 0.85-1.15')
     parser.add_argument('--aug-t2w-only', action='store_true',
                         help='Intensity aug on T2W only; ADC gets spatial aug only')
     parser.add_argument('--hflip',         action='store_true',
