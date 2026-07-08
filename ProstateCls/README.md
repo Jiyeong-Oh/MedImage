@@ -131,7 +131,11 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Metrics at thr=0.5 and Youden opti
 | mask_guided | mg_fbn_bal | 0.825 | 0.710 | 48.1% | 80.4% | 13 | 14 | 0.999 | 40.7% | 83.9% |
 | weight_tiling | wt_os5_cw4 | 0.762 | 0.649 | 22.2% | 81.8% | 6  | 21 | 0.002 | 63.0% | 66.4% |
 | mask_guided | mg_os5 | 0.734 | 0.603 | 14.8% | 87.4% | 4  | 23 | 0.000 | 40.7% | 65.7% |
-| seg_cls | — | — | *pending* | — | — | — | — | — | — | — |
+| seg_cls | **seg_fbn_bal_d02** | 0.773 | **0.735** | 63.0% | 65.7% | 17 | 10 | 0.269 | 77.8% | 46.2% |
+| seg_cls | seg_fbn_fbal | — | *pending* | — | — | — | — | — | — | — |
+| seg_cls | seg_fbn_focal | — | *pending* | — | — | — | — | — | — | — |
+| seg_cls | seg_fbn_focal_d02 | — | *pending* | — | — | — | — | — | — | — |
+| seg_cls | seg_os5 | — | *pending* | — | — | — | — | — | — | — |
 
 **Bold** = best per method. Test set: 27 csPCa, 143 ciPCa.
 
