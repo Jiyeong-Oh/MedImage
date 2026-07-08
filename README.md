@@ -226,14 +226,37 @@ Test set: 170 patients (csPCa=27, ciPCa=143). All 16 trained runs ranked by Test
 |:-:|:-:|:-:|
 | ![ROC](ProstateCls/weight_tiling/figures/wt_fbn_fbal/roc_pr_curve.png) | ![LR](ProstateCls/weight_tiling/figures/wt_fbn_fbal/learning_curve.png) | ![CM](ProstateCls/weight_tiling/figures/wt_fbn_fbal/confusion_matrix.png) |
 
-### Grad-CAM: `wt_fbn_fbal` — Patient 10085 (csPCa True Positive, p=0.764)
+### Grad-CAM: `wt_fbn_fbal` — csPCa Examples
 
-Each panel shows: T2W MRI · Saliency map · Saliency overlay · Tumor mask (red contour).
-The Grad-CAM hot-spot (red) aligns with the tumor mask location at the prostate periphery.
+Each row shows: **T2W MRI · Saliency map · Saliency overlay · Tumor mask** (red contour).  
+Green title = True Positive · Red title = False Negative (missed).
 
-| Slice 11 | Slice 12 |
-|:-:|:-:|
-| ![z11](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10085_1000085_z11.png) | ![z12](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10085_1000085_z12.png) |
+**Patient 10085** · Slice 11 (TP, p=0.764)
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10085_1000085_z11.png)
+
+**Patient 10085** · Slice 12 (TP, p=0.764)
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10085_1000085_z12.png)
+
+**Patient 10970** · Slice 10 (TP, p=0.753) — strong focal alignment with tumor
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10970_1000989_z10.png)
+
+**Patient 10970** · Slice 14 (TP, p=0.753)
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10970_1000989_z14.png)
+
+**Patient 10867** · Slice 9 (TP, p=0.767)
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10867_1000883_z09.png)
+
+**Patient 10372** · Slice 10 (FN, p=0.457) — missed csPCa
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10372_1000378_z10.png)
+
+**Patient 10372** · Slice 11 (FN, p=0.457)
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10372_1000378_z11.png)
+
+**Patient 10289** · Slice 21 (FN, p=0.428)
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10289_1000295_z21.png)
+
+**Patient 10289** · Slice 22 (FN, p=0.428)
+![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10289_1000295_z22.png)
 
 ---
 
