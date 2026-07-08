@@ -153,15 +153,13 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Metrics at thr=0.5 and Youden opti
 |:-:|:-:|:-:|
 | ![ROC](weight_tiling/figures/wt_fbn_fbal/roc_pr_curve.png) | ![LR](weight_tiling/figures/wt_fbn_fbal/learning_curve.png) | ![CM](weight_tiling/figures/wt_fbn_fbal/confusion_matrix.png) |
 
-### Grad-CAM: `wt_fbn_fbal` (True Positive cases)
+### Grad-CAM: `wt_fbn_fbal` — Patient 10085 (csPCa True Positive)
 
-![GradCAM](weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10005_1000005.gif)
+Grad-CAM saliency overlaid on T2W MRI. Red hot-spot aligns with tumor mask (right panel).
 
-### MIL Attention: `mil_baseline` (Test AUC 0.759)
-
-| ROC & PR Curve | Slice Attention Map |
+| Slice 11 | Slice 12 |
 |:-:|:-:|
-| ![ROC](mil_abmil/figures/baseline/roc_pr_curve.png) | ![Attn](mil_abmil/figures/attn01/attention/attn_10005_1000005.gif) |
+| ![z11](weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10085_1000085_z11.png) | ![z12](weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10085_1000085_z12.png) |
 
 ---
 
