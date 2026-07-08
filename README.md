@@ -180,31 +180,27 @@ Tested with attention regularization (`--attn-lambda 0.1`) to spread attention a
 
 ## Results
 
-Test set: 170 patients (csPCa=27, ciPCa=143). All 16 trained runs ranked by Test AUC.
+Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
 
-| Method | Run | Val AUC | **Test AUC** | Sens@0.5 | Spec@0.5 | TP | FN | Youden thr | Sens@Y | Spec@Y |
-|--------|-----|--------:|------------:|---------:|---------:|---:|---:|----------:|-------:|-------:|
-| weight_tiling | **wt_fbn_fbal** | 0.774 | **0.800** | 55.6% | 78.3% | 15 | 12 | 0.367 | 81.5% | 72.7% |
-| channel_adapter | **ca_os5** | 0.700 | **0.762** | 37.0% | 84.6% | 10 | 17 | 0.007 | 63.0% | 72.7% |
-| mil_abmil | **baseline** | 0.792 | **0.759** | 92.6% | 42.0% | 25 | 2  | 0.876 | 74.1% | 65.7% |
-| mil_abmil | attn01 | 0.854 | 0.743 | 18.5% | 93.0% | 5  | 22 | 0.000 | 70.4% | 58.0% |
-| cnn_head | **cnn_fbn_focal** | 0.814 | **0.739** | 40.7% | 86.7% | 11 | 16 | 0.024 | 63.0% | 74.1% |
-| weight_tiling | wt_fbn | 0.848 | 0.734 | 37.0% | 92.3% | 10 | 17 | 0.000 | 44.4% | 82.5% |
-| weight_tiling | wt_fbn_cos | 0.864 | 0.728 | 33.3% | 90.2% | 9  | 18 | 0.000 | 48.1% | 81.1% |
-| weight_tiling | wt_os5 | 0.798 | 0.729 | 70.4% | 65.0% | 19 | 8  | 0.824 | 55.6% | 72.7% |
-| weight_tiling | wt_aug | 0.755 | 0.723 | 33.3% | 88.1% | 9  | 18 | 0.084 | 40.7% | 81.1% |
-| weight_tiling | wt_cw6_aug | 0.797 | 0.720 | 29.6% | 88.1% | 8  | 19 | 0.001 | 77.8% | 65.0% |
-| cnn_head | cnn_os5 | 0.807 | 0.717 | 33.3% | 81.1% | 9  | 18 | 0.004 | 74.1% | 65.0% |
-| mil_abmil | mil_os5 | 0.778 | 0.713 | 92.6% | 48.2% | 25 | 2  | 0.982 | 55.6% | 70.6% |
-| weight_tiling | wt_cw6 | 0.797 | 0.679 | 37.0% | 77.6% | 10 | 17 | 0.017 | 55.6% | 62.2% |
-| mask_guided | **mg_fbn_bal** | 0.825 | **0.710** | 48.1% | 80.4% | 13 | 14 | 0.999 | 40.7% | 83.9% |
-| weight_tiling | wt_os5_cw4 | 0.762 | 0.649 | 22.2% | 81.8% | 6  | 21 | 0.002 | 63.0% | 66.4% |
-| mask_guided | mg_os5 | 0.734 | 0.603 | 14.8% | 87.4% | 4  | 23 | 0.000 | 40.7% | 65.7% |
-| seg_cls | **seg_fbn_bal_d02** | 0.773 | **0.735** | 63.0% | 65.7% | 17 | 10 | 0.269 | 77.8% | 46.2% |
-| seg_cls | seg_fbn_fbal | — | *pending* | — | — | — | — | — | — | — |
-| seg_cls | seg_fbn_focal | — | *pending* | — | — | — | — | — | — | — |
-| seg_cls | seg_fbn_focal_d02 | — | *pending* | — | — | — | — | — | — | — |
-| seg_cls | seg_os5 | — | *pending* | — | — | — | — | — | — | — |
+| Method | Run | Val AUC | **Test AUC** | Youden thr | Sens@Y | Spec@Y | TP | FN |
+|--------|-----|--------:|------------:|-----------:|-------:|-------:|---:|---:|
+| weight_tiling | **wt_fbn_fbal** | 0.774 | **0.800** | 0.367 | 81.5% | 72.7% | 15 | 12 |
+| channel_adapter | **ca_os5** | 0.700 | **0.762** | 0.007 | 63.0% | 72.7% | 10 | 17 |
+| mil_abmil | **baseline** | 0.792 | **0.759** | 0.876 | 74.1% | 65.7% | 25 | 2  |
+| mil_abmil | attn01 | 0.854 | 0.743 | 0.000 | 70.4% | 58.0% | 5  | 22 |
+| seg_cls | **seg_fbn_bal_d02** | 0.773 | **0.735** | 0.269 | 77.8% | 46.2% | 17 | 10 |
+| cnn_head | **cnn_fbn_focal** | 0.814 | **0.739** | 0.024 | 63.0% | 74.1% | 11 | 16 |
+| weight_tiling | wt_fbn | 0.848 | 0.734 | 0.000 | 44.4% | 82.5% | 10 | 17 |
+| weight_tiling | wt_fbn_cos | 0.864 | 0.728 | 0.000 | 48.1% | 81.1% | 9  | 18 |
+| weight_tiling | wt_os5 | 0.798 | 0.729 | 0.824 | 55.6% | 72.7% | 19 | 8  |
+| weight_tiling | wt_aug | 0.755 | 0.723 | 0.084 | 40.7% | 81.1% | 9  | 18 |
+| weight_tiling | wt_cw6_aug | 0.797 | 0.720 | 0.001 | 77.8% | 65.0% | 8  | 19 |
+| cnn_head | cnn_os5 | 0.807 | 0.717 | 0.004 | 74.1% | 65.0% | 9  | 18 |
+| mil_abmil | mil_os5 | 0.778 | 0.713 | 0.982 | 55.6% | 70.6% | 25 | 2  |
+| weight_tiling | wt_cw6 | 0.797 | 0.679 | 0.017 | 55.6% | 62.2% | 10 | 17 |
+| mask_guided | **mg_fbn_bal** | 0.825 | **0.710** | 0.999 | 40.7% | 83.9% | 13 | 14 |
+| weight_tiling | wt_os5_cw4 | 0.762 | 0.649 | 0.002 | 63.0% | 66.4% | 6  | 21 |
+| mask_guided | mg_os5 | 0.734 | 0.603 | 0.000 | 40.7% | 65.7% | 4  | 23 |
 
 **Bold run** = best per method. TP/FN out of 27 csPCa test patients.
 
@@ -258,18 +254,3 @@ Green title = True Positive · Red title = False Negative (missed).
 **Patient 10289** · Slice 22 (FN, p=0.428)
 ![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10289_1000295_z22.png)
 
----
-
-## Other Projects
-
-### MedViT
-
-CNN-Transformer hybrid backbone for 2D medical image classification on MedMNIST and ImageNet-style datasets. Supports distributed multi-GPU training, Mixup/CutMix augmentation, and knowledge distillation. Three variants: `MedViT_small`, `MedViT_base`, `MedViT_large`.
-
-See [MedViT/](MedViT/) for training scripts and [MedViT/MedViT.py](MedViT/MedViT.py) for the full architecture.
-
-### SwinSegNet
-
-Swin Transformer V2 U-Net for colon gland segmentation on the GlaS dataset. Encoder uses `swinv2_tiny_window8_256` (via timm), decoder uses RFB blocks + CBAM attention. Loss: `0.7 × BCE + 0.3 × IoU`.
-
-See [SwinSegNet/](SwinSegNet/) for Jupyter notebooks.
