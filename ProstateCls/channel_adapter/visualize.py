@@ -15,9 +15,9 @@ import os
 import re
 import sys
 import numpy as np
-import nibabel as nib
 import torch
 import torch.nn.functional as F
+from scipy.ndimage import gaussian_filter
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -27,8 +27,7 @@ from sklearn.metrics import (roc_auc_score, roc_curve, f1_score, confusion_matri
 
 # dataset from parent directory
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from dataset import (PatientVolumeDataset, load_labels, _gland_centroid_2d,
-                     _fov_crop_and_resize, _resample_inplane, TARGET_SPACING)
+from dataset import (PatientVolumeDataset, load_labels, load_viz_volumes)
 
 # local channel-adapter model
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,47 +36,10 @@ from model import build_model
 DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
 
 
-def get_best_display_slice(pid, n_slices=32):
-    """Return (tensor_idx, volume_z) for the z with the most tumor area within the sampled range."""
-    t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
-    tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
-    D     = nib.load(t2w_path).shape[2]
-    start = (D - n_slices) // 2 if D >= n_slices else 0
-    n_eff = min(n_slices, D)
-    fallback_ti = n_slices // 2
-    fallback_vz = start + fallback_ti
-    if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
-        return fallback_ti, fallback_vz
-    tumor_vol = nib.load(tumor_path).get_fdata()
-    areas = np.array([tumor_vol[:, :, start + i].sum() for i in range(n_eff)])
-    if areas.max() > 0:
-        best = int(areas.argmax())
-        return best, start + best
-    return fallback_ti, fallback_vz
-
-
-def load_tumor_slice(pid, volume_z, target_size=224):
-    """Load tumor mask at volume_z with same resample+FOV crop as dataset."""
-    t2w_path   = os.path.join(DATA_ROOT, pid, f'{pid}_t2w.nii.gz')
-    tumor_path = os.path.join(DATA_ROOT, pid, f'{pid}_tumor.nii.gz')
-    gland_path = os.path.join(DATA_ROOT, pid, f'{pid}_gland.nii.gz')
-    spacing  = float(nib.load(t2w_path).header.get_zooms()[0])
-    gland_3d = (nib.load(gland_path).get_fdata() > 0.5).astype(np.float32)
-    gland_3d = _resample_inplane(gland_3d, spacing)
-    gland_3d = (gland_3d > 0.5).astype(np.float32)
-    cy, cx   = _gland_centroid_2d(gland_3d)
-    if not os.path.exists(tumor_path) or os.path.getsize(tumor_path) == 0:
-        return np.zeros((target_size, target_size), dtype=np.float32)
-    tumor_vol = nib.load(tumor_path).get_fdata().astype(np.float32)
-    tumor_vol = _resample_inplane(tumor_vol, spacing)
-    z  = min(volume_z, tumor_vol.shape[2] - 1)
-    sl = tumor_vol[:, :, z]
-    sl = _fov_crop_and_resize(torch.from_numpy(sl[None]), cy, cx, TARGET_SPACING, target_size=target_size)
-    return (sl.squeeze().numpy() > 0.5).astype(np.float32)
-
-
 def parse_log(logfile):
     epochs, losses, val_aucs = [], [], []
+    if not logfile or not os.path.exists(logfile):
+        return np.array(epochs), np.array(losses), np.array(val_aucs)
     with open(logfile) as f:
         for line in f:
             m = re.search(r'Epoch\s+(\d+)/\d+.*loss:\s*([\d.]+).*val AUC:\s*([\d.]+)', line)
@@ -88,8 +50,8 @@ def parse_log(logfile):
     return np.array(epochs), np.array(losses), np.array(val_aucs)
 
 
-def get_probs(model, records, device, n_slices):
-    ds = PatientVolumeDataset(records, augment=False, n_slices=n_slices)
+def get_probs(model, records, device, n_slices, nch=2):
+    ds = PatientVolumeDataset(records, augment=False, n_slices=n_slices, n_ch_per_slice=nch)
     lbls, probs, pids = [], [], []
     model.eval()
     with torch.no_grad():
@@ -100,72 +62,73 @@ def get_probs(model, records, device, n_slices):
     return np.array(lbls), np.array(probs), pids
 
 
-class GradCAM:
-    def __init__(self, model):
-        self.model     = model
-        self.features  = None
-        self.gradients = None
-        self._fhook = model.norm.register_forward_hook(
-            lambda m, i, o: setattr(self, 'features', o.detach()))
-        self._bhook = model.norm.register_full_backward_hook(
-            lambda m, gi, go: setattr(self, 'gradients', go[0].detach()))
+class GradCAMPerSlice:
+    """Per-slice input-gradient saliency for depth-as-channel models."""
+    def __init__(self, model, n_ch_per_slice):
+        self.model = model
+        self.nch   = n_ch_per_slice
 
     def __call__(self, tensor, class_idx=1):
         self.model.eval()
         self.model.zero_grad()
-        out = self.model(tensor.unsqueeze(0))
+        x = tensor.unsqueeze(0).detach().requires_grad_(True)
+        out = self.model(x)
         out[0, class_idx].backward()
-        weights = self.gradients.mean(dim=(2, 3), keepdim=True)
-        cam = F.relu((weights * self.features).sum(dim=1, keepdim=True))
-        cam = cam - cam.min()
-        if cam.max() > 0:
-            cam = cam / cam.max()
-        cam = F.interpolate(cam, size=(tensor.shape[-2], tensor.shape[-1]),
-                            mode='bilinear', align_corners=False)
-        return cam.squeeze().cpu().numpy()
-
-    def remove(self):
-        self._fhook.remove()
-        self._bhook.remove()
+        grad = x.grad.squeeze(0).cpu()
+        n = tensor.shape[0] // self.nch
+        maps = []
+        for zi in range(n):
+            g = grad[zi*self.nch:(zi+1)*self.nch].abs().mean(0).numpy()
+            g = gaussian_filter(g, sigma=4)
+            g -= g.min()
+            if g.max() > 1e-8:
+                g /= g.max()
+            maps.append(g)
+        return maps
 
 
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
     os.makedirs(args.output_dir, exist_ok=True)
-    job_id = os.path.basename(args.log).replace('.out', '')
+    job_id = (os.path.basename(args.log).replace('.out', '')
+              if args.log else os.path.basename(os.path.dirname(os.path.abspath(args.ckpt))))
 
     # ── 1. Learning curve ─────────────────────────────────────────────────────
     epochs, losses, val_aucs = parse_log(args.log)
-    best_idx = np.argmax(val_aucs)
-    best_ep, best_auc = epochs[best_idx], val_aucs[best_idx]
-    print(f"Parsed {len(epochs)} epochs  |  Best val AUC: {best_auc:.4f} @ ep{best_ep}")
+    if len(epochs) > 0:
+        best_idx = np.argmax(val_aucs)
+        best_ep, best_auc = epochs[best_idx], val_aucs[best_idx]
+        print(f"Parsed {len(epochs)} epochs  |  Best val AUC: {best_auc:.4f} @ ep{best_ep}")
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    fig.suptitle(f'Job {job_id} — Channel Adapter (backbone 1e-5 / adapter+head 3e-4)', fontsize=13)
+        fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+        fig.suptitle(f'Job {job_id} — Channel Adapter (backbone 1e-5 / adapter+head 3e-4)', fontsize=13)
 
-    ax = axes[0]
-    ax.plot(epochs, losses, color='steelblue', lw=1, alpha=0.7, label='Train loss')
-    if len(losses) >= 5:
-        smooth = np.convolve(losses, np.ones(5)/5, mode='valid')
-        ax.plot(epochs[4:], smooth, color='navy', lw=2, label='5-ep mean')
-    ax.set_xlabel('Epoch'); ax.set_ylabel('Loss')
-    ax.set_title('Training Loss'); ax.legend(); ax.grid(True, alpha=0.3)
+        ax = axes[0]
+        ax.plot(epochs, losses, color='steelblue', lw=1, alpha=0.7, label='Train loss')
+        if len(losses) >= 5:
+            smooth = np.convolve(losses, np.ones(5)/5, mode='valid')
+            ax.plot(epochs[4:], smooth, color='navy', lw=2, label='5-ep mean')
+        ax.set_xlabel('Epoch'); ax.set_ylabel('Loss')
+        ax.set_title('Training Loss'); ax.legend(); ax.grid(True, alpha=0.3)
 
-    ax = axes[1]
-    ax.plot(epochs, val_aucs, color='tomato', lw=1, alpha=0.7, label='Val AUC-ROC')
-    ax.axhline(best_auc, color='gray', ls='--', alpha=0.5)
-    ax.scatter([best_ep], [best_auc], color='red', s=100, zorder=5,
-               label=f'Best: {best_auc:.4f} @ ep{best_ep}')
-    ax.set_xlabel('Epoch'); ax.set_ylabel('AUC-ROC')
-    ax.set_title('Validation AUC-ROC'); ax.legend(); ax.grid(True, alpha=0.3)
-    ax.set_ylim(0.5, 1.0)
+        ax = axes[1]
+        ax.plot(epochs, val_aucs, color='tomato', lw=1, alpha=0.7, label='Val AUC-ROC')
+        ax.axhline(best_auc, color='gray', ls='--', alpha=0.5)
+        ax.scatter([best_ep], [best_auc], color='red', s=100, zorder=5,
+                   label=f'Best: {best_auc:.4f} @ ep{best_ep}')
+        ax.set_xlabel('Epoch'); ax.set_ylabel('AUC-ROC')
+        ax.set_title('Validation AUC-ROC'); ax.legend(); ax.grid(True, alpha=0.3)
+        ax.set_ylim(0.5, 1.0)
 
-    plt.tight_layout()
-    p = os.path.join(args.output_dir, 'learning_curve.png')
-    plt.savefig(p, dpi=300, bbox_inches='tight')
-    plt.savefig(p.replace('.png', '.svg'), bbox_inches='tight')
-    plt.close(); print(f"Saved: {p}")
+        plt.tight_layout()
+        p = os.path.join(args.output_dir, 'learning_curve.png')
+        plt.savefig(p, dpi=300, bbox_inches='tight')
+        plt.savefig(p.replace('.png', '.svg'), bbox_inches='tight')
+        plt.close(); print(f"Saved: {p}")
+    else:
+        best_ep, best_auc = 0, 0.0
+        print("No training log — skipping learning curve")
 
     # ── 2. Data splits ────────────────────────────────────────────────────────
     records = load_labels()
@@ -179,16 +142,17 @@ def main(args):
     print(f"Test: {len(test_r)} (csPCa={sum(r[1] for r in test_r)})")
 
     # ── 3. Load model ─────────────────────────────────────────────────────────
+    nch = 3 if args.add_gland_ch else 2
     model = build_model(num_classes=2, pretrained=False, n_slices=args.n_slices,
-                        head_depth=args.head_depth, backbone=args.backbone)
-    model.load_state_dict(torch.load(args.ckpt, map_location=device, weights_only=False))
+                        head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=nch)
+    model.load_state_dict(torch.load(args.ckpt, map_location=device, weights_only=False), strict=False)
     model = model.to(device)
     print(f"Loaded: {args.ckpt}  (best ep={best_ep})")
 
     print("Running val inference...")
-    val_lbl,  val_prob,  _    = get_probs(model, val_r,  device, args.n_slices)
+    val_lbl,  val_prob,  _    = get_probs(model, val_r,  device, args.n_slices, nch)
     print("Running test inference...")
-    test_lbl, test_prob, pids = get_probs(model, test_r, device, args.n_slices)
+    test_lbl, test_prob, pids = get_probs(model, test_r, device, args.n_slices, nch)
 
     val_auc  = roc_auc_score(val_lbl,  val_prob)
     test_auc = roc_auc_score(test_lbl, test_prob)
@@ -296,50 +260,61 @@ def main(args):
     if args.gradcam:
         gradcam_dir = os.path.join(args.output_dir, 'gradcam')
         os.makedirs(gradcam_dir, exist_ok=True)
-        test_ds = PatientVolumeDataset(test_r, augment=False, n_slices=args.n_slices)
-        gradcam = GradCAM(model)
+        test_ds = PatientVolumeDataset(test_r, augment=False, n_slices=args.n_slices, n_ch_per_slice=nch)
+        gradcam = GradCAMPerSlice(model, nch)
         for i, (pid, lbl, prob) in enumerate(zip(pids, test_lbl, test_prob)):
-            tensor, _, _ = test_ds[i]
-            ti, vz  = get_best_display_slice(pid, n_slices=args.n_slices)
-            heatmap = gradcam(tensor.to(device))
-            t2w     = tensor[ti * 3].numpy()
-            tumor   = load_tumor_slice(pid, vz, target_size=t2w.shape[0])
+            tensor, _, _, _ = test_ds[i]
+            heatmaps = gradcam(tensor.to(device))
             true  = 'csPCa' if lbl==1 else 'ciPCa'
             pred  = 'csPCa' if prob>=0.5 else 'ciPCa'
-            slice_note = f'z={vz}' if tumor.max() > 0 else f'z={vz} (no tumor)'
 
-            fig, axes = plt.subplots(1, 4, figsize=(17, 4))
-            axes[0].imshow(t2w, cmap='gray');  axes[0].set_title(f'T2W ({slice_note})'); axes[0].axis('off')
-            axes[1].imshow(heatmap, cmap='jet', vmin=0, vmax=1); axes[1].set_title('Grad-CAM'); axes[1].axis('off')
-            axes[2].imshow(t2w, cmap='gray')
-            axes[2].imshow(heatmap, cmap='jet', alpha=0.5, vmin=0, vmax=1)
-            axes[2].set_title('Grad-CAM Overlay'); axes[2].axis('off')
-            axes[3].imshow(t2w, cmap='gray')
-            if tumor.max() > 0:
-                axes[3].imshow(tumor, cmap='Reds', alpha=0.4, vmin=0, vmax=1)
-                axes[3].contour(tumor, levels=[0.5], colors='red', linewidths=1.5)
-            axes[3].set_title('Tumor Mask' if tumor.max() > 0 else 'Tumor Mask (none)'); axes[3].axis('off')
-            fig.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})',
-                         fontsize=12, color='green' if true==pred else 'red', fontweight='bold')
-            plt.tight_layout()
-            plt.savefig(os.path.join(gradcam_dir, f'gradcam_{pid}.png'), dpi=200, bbox_inches='tight')
-            plt.close()
+            vols      = load_viz_volumes(pid, n_slices=args.n_slices)
+            t2w_vol   = vols['t2w']
+            tumor_vol = vols['tumor']
+
+            tumor_slices   = [z for z in range(args.n_slices) if tumor_vol[:, :, z].sum() > 0]
+            display_slices = tumor_slices if tumor_slices else [args.n_slices // 2]
+
+            for zi in display_slices:
+                t2w_sl   = t2w_vol[:, :, zi]
+                tumor_sl = tumor_vol[:, :, zi]
+                suffix   = f'_z{zi:02d}' if tumor_slices else ''
+
+                fig, axes = plt.subplots(1, 4, figsize=(17, 4))
+                axes[0].imshow(t2w_sl, cmap='gray')
+                axes[0].set_title(f'T2W (slice {zi})'); axes[0].axis('off')
+                axes[1].imshow(heatmaps[zi], cmap='jet', vmin=0, vmax=1)
+                axes[1].set_title('Saliency (slice)'); axes[1].axis('off')
+                axes[2].imshow(t2w_sl, cmap='gray')
+                axes[2].imshow(heatmaps[zi], cmap='jet', alpha=0.5, vmin=0, vmax=1)
+                axes[2].set_title('Saliency Overlay'); axes[2].axis('off')
+                axes[3].imshow(t2w_sl, cmap='gray')
+                if tumor_sl.max() > 0:
+                    axes[3].imshow(tumor_sl, cmap='Reds', alpha=0.4, vmin=0, vmax=1)
+                    axes[3].contour(tumor_sl, levels=[0.5], colors='red', linewidths=1.5)
+                axes[3].set_title('Tumor Mask' if tumor_sl.max() > 0 else 'Tumor Mask (none)')
+                axes[3].axis('off')
+                fig.suptitle(f'{pid}  GT:{true}  Pred:{pred} (p={prob:.3f})',
+                             fontsize=12, color='green' if true==pred else 'red', fontweight='bold')
+                plt.tight_layout()
+                plt.savefig(os.path.join(gradcam_dir, f'gradcam_{pid}{suffix}.png'),
+                            dpi=200, bbox_inches='tight')
+                plt.close()
+
             if lbl == 1:
                 from PIL import Image as _PIL_Image
                 import io as _io
-                start_z = vz - ti
                 gif_frames = []
                 for si in range(args.n_slices):
-                    vz_i = start_z + si
-                    t2w_i = tensor[si * 3].numpy()
-                    tumor_i = load_tumor_slice(pid, vz_i, target_size=t2w_i.shape[0])
+                    t2w_i   = t2w_vol[:, :, si]
+                    tumor_i = tumor_vol[:, :, si]
                     fig_g, ax_g = plt.subplots(1, 3, figsize=(13, 4))
                     ax_g[0].imshow(t2w_i, cmap='gray')
-                    ax_g[0].set_title(f'T2W  {si+1}/{args.n_slices}  z={vz_i}')
+                    ax_g[0].set_title(f'T2W  {si+1}/{args.n_slices}  (bbox z={si})')
                     ax_g[0].axis('off')
                     ax_g[1].imshow(t2w_i, cmap='gray')
-                    ax_g[1].imshow(heatmap, cmap='jet', alpha=0.45, vmin=0, vmax=1)
-                    ax_g[1].set_title('Grad-CAM Overlay')
+                    ax_g[1].imshow(heatmaps[si], cmap='jet', alpha=0.45, vmin=0, vmax=1)
+                    ax_g[1].set_title('Saliency Overlay')
                     ax_g[1].axis('off')
                     ax_g[2].imshow(t2w_i, cmap='gray')
                     if tumor_i.max() > 0:
@@ -361,7 +336,6 @@ def main(args):
                     save_all=True, append_images=gif_frames[1:],
                     duration=250, loop=0
                 )
-        gradcam.remove()
         print(f"Grad-CAM saved to {gradcam_dir}/")
 
     print("\nDone.")
@@ -369,7 +343,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--log',        type=str,   required=True)
+    parser.add_argument('--log',        type=str,   default='')
     parser.add_argument('--ckpt',       type=str,   required=True)
     parser.add_argument('--output-dir', type=str,   required=True)
     parser.add_argument('--n-slices',   type=int,   default=32)
@@ -379,6 +353,7 @@ if __name__ == '__main__':
     parser.add_argument('--head-depth', type=int,   default=2)
     parser.add_argument('--backbone',   type=str,   default='small',
                         choices=['small', 'base', 'large'])
+    parser.add_argument('--add-gland-ch',  action='store_true')
     parser.add_argument('--no-gradcam', dest='gradcam', action='store_false')
     parser.set_defaults(gradcam=True)
     main(parser.parse_args())

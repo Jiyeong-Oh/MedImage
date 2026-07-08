@@ -3,7 +3,7 @@
 #SBATCH -A r02144
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH -t 12:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ojyhi010402@gmail.com
@@ -24,7 +24,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
         --job-name=$NAME \
         --output=$WORKDIR/logs/$NAME/%j.out \
         --error=$WORKDIR/logs/$NAME/%j.err \
-        --export=ALL,RUN_NAME=$NAME,EXTRA_ARGS="$EXTRA" \
+        --export=NONE,RUN_NAME=$NAME,EXTRA_ARGS="$EXTRA" \
         $0
     echo "▶ Submitted: $NAME  extra=${EXTRA:-none}"
     exit 0
@@ -45,7 +45,7 @@ $PYTHON $WORKDIR/train.py \
     --lr-patience 10 \
     --weight-decay 1e-4 \
     --patience 30 \
-    --batch-size 8 \
+    --batch-size 32 \
     --seed 42 \
     --n-slices 32 \
     --val-size 0.15 \

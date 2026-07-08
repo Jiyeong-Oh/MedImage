@@ -47,6 +47,9 @@ class MaskGuidedModel(nn.Module):
         # Expose norm for GradCAM hooks
         self.norm = backbone_medvit.norm
 
+        self.tumor_probe  = nn.Sequential(nn.Conv2d(1024, 1, 1, bias=False), nn.Sigmoid())
+        self.last_attn_map = None
+
         # Mask context branch: per-slice prostate coverage → [B, 64]
         self.mask_branch = nn.Sequential(
             nn.Linear(n_slices, MASK_DIM),
@@ -68,15 +71,20 @@ class MaskGuidedModel(nn.Module):
         print(f"[model] backbone: MedViT  proj_head: {arch}  (dropout={head_dropout})")
 
     def forward(self, x, mask):
-        feats    = self.backbone(x)               # [B, 1024]
-        mask_cov = mask.mean(dim=[2, 3])          # [B, 32] per-slice coverage
-        mask_ctx = self.mask_branch(mask_cov)     # [B, 64]
+        h = self.backbone.stem(x)
+        for layer in self.backbone.features:
+            h = layer(h)
+        f4 = self.backbone.norm(h)                          # [B, 1024, 7, 7]
+        self.last_attn_map = self.tumor_probe(f4)           # [B, 1,    7, 7]
+        feats    = self.backbone.avgpool(f4).flatten(1)     # [B, 1024]
+        mask_cov = mask.mean(dim=[2, 3])                    # [B, 32] per-slice coverage
+        mask_ctx = self.mask_branch(mask_cov)               # [B, 64]
         combined = torch.cat([feats, mask_ctx], dim=1)
         return self.proj_head(combined)
 
 
 def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
-                head_dropout=0.2, head_depth=2, backbone='small'):
+                head_dropout=0.2, head_depth=2, backbone='small', n_ch_per_slice=3):
     path   = ckpt_path or CKPT_PATHS[backbone]
     medvit = _BUILDERS[backbone](num_classes=num_classes)
 
@@ -88,19 +96,20 @@ def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
         medvit.load_state_dict(state, strict=False)
         print(f"[model] Pretrained backbone loaded from {path}")
 
-    # 2. Inflate first conv 3ch → 96ch using pretrained weights
+    # 2. Inflate first conv → n_slices*n_ch_per_slice ch using pretrained weights
+    in_ch    = n_slices * n_ch_per_slice
     old_conv = medvit.stem[0].conv              # Conv2d(3, 64, 3×3) with pretrained weights
     old_w    = old_conv.weight.data             # [64, 3, 3, 3]
     new_conv = nn.Conv2d(
-        n_slices * 3, old_conv.out_channels,
+        in_ch, old_conv.out_channels,
         kernel_size=old_conv.kernel_size,
         stride=old_conv.stride,
         padding=old_conv.padding,
         bias=False,
     )
-    new_conv.weight.data = old_w.repeat(1, n_slices, 1, 1) / n_slices
+    new_conv.weight.data = old_w[:, :n_ch_per_slice, :, :].repeat(1, n_slices, 1, 1) / n_slices
     medvit.stem[0].conv = new_conv
-    print(f"[model] First conv inflated: 3 → {n_slices*3} channels (weight tiling ÷{n_slices})")
+    print(f"[model] First conv inflated: {n_ch_per_slice} → {in_ch} channels (weight tiling ÷{n_slices})")
 
     # 3. Replace proj_head with Identity → backbone outputs [B, 1024]
     medvit.proj_head = nn.Identity()

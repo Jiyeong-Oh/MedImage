@@ -3,7 +3,7 @@
 #SBATCH -A r02144
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --mem=96G
 #SBATCH -t 1:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ojyhi010402@gmail.com
@@ -21,8 +21,8 @@ if [ -z "$SLURM_JOB_ID" ]; then
     fi
     LOG=$(for f in $(ls -t $WORKDIR/logs/$NAME/*.out 2>/dev/null); do grep -q "Epoch " "$f" && echo "$f" && break; done)
     if [ -z "$LOG" ]; then
-        echo "Error: no log found in logs/$NAME/"
-        exit 1
+        echo "Warning: no training log found in logs/$NAME/ — learning curve will be skipped"
+        LOG=""
     fi
     # read head_depth and backbone from config.json
     HEAD_DEPTH=$(python3 -c "
@@ -41,12 +41,20 @@ try:
 except: print('small')
 " 2>/dev/null)
     BACKBONE=${BACKBONE:-small}
+    ADD_GLAND_CH=$(python3 -c "
+import json
+try:
+    c = json.load(open('$WORKDIR/output/$NAME/config.json'))
+    print('1' if c.get('training', {}).get('add_gland_ch', False) else '0')
+except: print('0')
+" 2>/dev/null)
+    ADD_GLAND_CH=${ADD_GLAND_CH:-0}
     mkdir -p $WORKDIR/figures/$NAME
     sbatch \
         --job-name=vis_$NAME \
         --output=$WORKDIR/logs/$NAME/%j.out \
         --error=$WORKDIR/logs/$NAME/%j.err \
-        --export=ALL,RUN_NAME=$NAME,TRAIN_LOG=$LOG,HEAD_DEPTH=$HEAD_DEPTH,BACKBONE=$BACKBONE \
+        --export=ALL,RUN_NAME=$NAME,TRAIN_LOG=$LOG,HEAD_DEPTH=$HEAD_DEPTH,BACKBONE=$BACKBONE,ADD_GLAND_CH=$ADD_GLAND_CH \
         $0
     echo "▶ Submitted vis: $NAME"
     echo "  Log: $LOG"
@@ -60,8 +68,11 @@ echo "GPU:    $CUDA_VISIBLE_DEVICES"
 echo "Run:    $RUN_NAME"
 echo "Start:  $(date)"
 
+GLAND_FLAG=""
+if [ "${ADD_GLAND_CH:-0}" = "1" ]; then GLAND_FLAG="--add-gland-ch"; fi
+
 $PYTHON $WORKDIR/visualize.py \
-    --log        $TRAIN_LOG \
+    --log        "$TRAIN_LOG" \
     --ckpt       $WORKDIR/output/$RUN_NAME/best.pth \
     --output-dir $WORKDIR/figures/$RUN_NAME \
     --n-slices 32 \
@@ -69,6 +80,7 @@ $PYTHON $WORKDIR/visualize.py \
     --val-size 0.15 \
     --test-size 0.15 \
     --head-depth ${HEAD_DEPTH:-2} \
-    --backbone   ${BACKBONE:-small}
+    --backbone   ${BACKBONE:-small} \
+    $GLAND_FLAG
 
 echo "End: $(date)"

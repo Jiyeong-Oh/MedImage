@@ -21,13 +21,22 @@ import torchvision.transforms.functional as TF
 
 sys_path_parent = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 
+# re-export load_viz_volumes from the parent dataset for use in visualize.py
+import importlib.util as _ilu
+_pds_spec = _ilu.spec_from_file_location('_parent_dataset',
+                os.path.join(sys_path_parent, 'dataset.py'))
+_pds = _ilu.module_from_spec(_pds_spec)
+_pds_spec.loader.exec_module(_pds)
+load_viz_volumes = _pds.load_viz_volumes
+del _pds_spec, _pds, _ilu
+
 DATA_ROOT = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered'
 CSV_PATH  = '/N/slate/ohjiye/PI-CAI/PI-CAI_reg_processed_filtered.csv'
 
-SKIP_PATIENTS = set()  # new dataset is clean — no patients need skipping
-
-FOV_MM         = 80.0  # fixed physical FOV (mm) centered on gland centroid
-TARGET_SPACING = 0.5   # resample all patients to this in-plane spacing (mm)
+SKIP_PATIENTS  = set()
+FOV_MM         = 80.0   # fixed physical FOV (mm) centered on gland centroid (legacy)
+TARGET_SPACING = 0.5    # resample all patients to this in-plane spacing (mm)
+BBOX_MARGIN_MM = 15.0   # physical margin added to every face of the 3D gland bbox
 
 
 def _resample_inplane(arr_hwz, current_spacing):
@@ -80,6 +89,73 @@ def _fov_crop_and_resize(tensor_chw, cy, cx, spacing, target_size=224):
 
     tensor_chw = tensor_chw[:, y0c:y1c, x0c:x1c]
     return TF.resize(tensor_chw, [target_size, target_size], antialias=True)
+
+
+def _gland_bbox_3d(gland_hwz, margin_px_xy, margin_px_z):
+    """3D bounding box of gland with margin on every face, clamped to volume bounds."""
+    H, W, D = gland_hwz.shape
+    ys, xs, zs = np.where(gland_hwz > 0.5)
+    if len(ys) == 0:
+        return 0, H, 0, W, 0, D
+    y0 = max(0, int(ys.min()) - margin_px_xy)
+    y1 = min(H, int(ys.max()) + margin_px_xy + 1)
+    x0 = max(0, int(xs.min()) - margin_px_xy)
+    x1 = min(W, int(xs.max()) + margin_px_xy + 1)
+    z0 = max(0, int(zs.min()) - margin_px_z)
+    z1 = min(D, int(zs.max()) + margin_px_z + 1)
+    return y0, y1, x0, x1, z0, z1
+
+
+def load_patient_bbox_crop(pid, n_slices=32, target_size=224, data_root=DATA_ROOT):
+    """
+    3D-bbox-crop variant of load_patient.
+    Crops to gland 3D bbox, then resamples to (target_size, target_size, n_slices).
+    Returned arrays are already at final spatial resolution.
+    """
+    folder  = os.path.join(data_root, pid)
+    t2w_img = nib.load(os.path.join(folder, f'{pid}_t2w.nii.gz'))
+    t2w     = t2w_img.get_fdata().astype(np.float32)
+    zooms   = t2w_img.header.get_zooms()
+    sp_xy   = float(zooms[0])
+    sp_z    = float(zooms[2])
+
+    adc   = nib.load(os.path.join(folder, f'{pid}_adc_reg.nii.gz')).get_fdata().astype(np.float32)
+    gland = nib.load(os.path.join(folder, f'{pid}_gland.nii.gz')).get_fdata().astype(np.float32)
+    gland = (gland > 0.5).astype(np.float32)
+
+    tumor_path = os.path.join(folder, f'{pid}_tumor.nii.gz')
+    if os.path.exists(tumor_path) and os.path.getsize(tumor_path) > 0:
+        tumor = (nib.load(tumor_path).get_fdata() > 0.5).astype(np.float32)
+    else:
+        tumor = np.zeros_like(gland)
+
+    t2w   = _resample_inplane(t2w,   sp_xy)
+    adc   = _resample_inplane(adc,   sp_xy)
+    gland = _resample_inplane(gland, sp_xy)
+    gland = (gland > 0.5).astype(np.float32)
+    tumor = _resample_inplane(tumor, sp_xy)
+    tumor = (tumor > 0.5).astype(np.float32)
+
+    margin_px_xy = max(2, int(round(BBOX_MARGIN_MM / TARGET_SPACING)))
+    margin_px_z  = max(1, int(round(BBOX_MARGIN_MM / sp_z)))
+    y0, y1, x0, x1, z0, z1 = _gland_bbox_3d(gland, margin_px_xy, margin_px_z)
+
+    t2w_c   = t2w[y0:y1, x0:x1, z0:z1]
+    adc_c   = adc[y0:y1, x0:x1, z0:z1]
+    gland_c = gland[y0:y1, x0:x1, z0:z1]
+    tumor_c = tumor[y0:y1, x0:x1, z0:z1]
+
+    t2w_c = percentile_norm_in_mask(t2w_c, gland_c)
+    adc_c = percentile_norm_in_mask(adc_c, gland_c)
+
+    Hc, Wc, Dc = t2w_c.shape
+    sc = (target_size / Hc, target_size / Wc, n_slices / Dc)
+    t2w_rs   = ndimage_zoom(t2w_c,   sc, order=1).astype(np.float32)
+    adc_rs   = ndimage_zoom(adc_c,   sc, order=1).astype(np.float32)
+    gland_rs = (ndimage_zoom(gland_c, sc, order=0) > 0.5).astype(np.float32)
+    tumor_rs = (ndimage_zoom(tumor_c, sc, order=0) > 0.5).astype(np.float32)
+
+    return {'t2w': t2w_rs, 'adc': adc_rs, 'gland': gland_rs, 'tumor': tumor_rs, 'bbox_crop': True}
 
 
 def load_labels(csv_path=CSV_PATH, data_root=DATA_ROOT):
@@ -137,10 +213,16 @@ def load_patient(pid, data_root=DATA_ROOT):
             'cy': cy, 'cx': cx, 'cz': cz}
 
 
-def slice_to_tensor(vols, z, target_size=224):
-    arr = np.stack([vols['t2w'][:, :, z],
-                    vols['adc'][:, :, z],
-                    vols['gland'][:, :, z]], axis=0)
+def slice_to_tensor(vols, z, target_size=224, soft_factor=0.0, n_ch_per_slice=3):
+    gland_sl = vols['gland'][:, :, z]
+    eff_mask = gland_sl + (1.0 - gland_sl) * soft_factor
+    if n_ch_per_slice == 2:
+        arr = np.stack([vols['t2w'][:, :, z] * eff_mask,
+                        vols['adc'][:, :, z] * eff_mask], axis=0)
+    else:
+        arr = np.stack([vols['t2w'][:, :, z] * eff_mask,
+                        vols['adc'][:, :, z] * eff_mask,
+                        gland_sl], axis=0)
     return _fov_crop_and_resize(torch.from_numpy(arr), vols['cy'], vols['cx'],
                                 vols['spacing'], target_size=target_size)
 
@@ -164,7 +246,7 @@ def _apply_intensity_aug(tensor, t2w_idx, adc_idx, noise_max, gamma_range, scale
     return tensor
 
 
-def augment_volume_tensor(tensor, t2w_int_only=False, no_hflip=False):
+def augment_volume_tensor(tensor, t2w_int_only=False, no_hflip=False, intensity_aug=False):
     n_ch    = tensor.shape[0]
     t2w_idx = list(range(0, n_ch, 3))
     adc_idx = list(range(1, n_ch, 3))
@@ -180,14 +262,15 @@ def augment_volume_tensor(tensor, t2w_int_only=False, no_hflip=False):
     if random.random() > 0.5:
         tensor = TF.affine(tensor, angle=0, translate=[0, 0], scale=1.0,
                            shear=random.uniform(-6, 6))
+    if not intensity_aug:
+        return tensor
     int_adc = [] if t2w_int_only else adc_idx
     return _apply_intensity_aug(tensor, t2w_idx, int_adc,
                                 noise_max=0.05, gamma_range=(0.85, 1.25),
                                 scale_range=(0.90, 1.10), shift_max=0.05, prob=0.4)
 
 
-
-def augment_volume_tensor_strong(tensor, t2w_int_only=False, no_hflip=False):
+def augment_volume_tensor_strong(tensor, t2w_int_only=False, no_hflip=False, intensity_aug=False):
     n_ch    = tensor.shape[0]
     t2w_idx = list(range(0, n_ch, 3))
     adc_idx = list(range(1, n_ch, 3))
@@ -203,6 +286,8 @@ def augment_volume_tensor_strong(tensor, t2w_int_only=False, no_hflip=False):
     if random.random() > 0.4:
         tensor = TF.affine(tensor, angle=0, translate=[0, 0], scale=1.0,
                            shear=random.uniform(-12, 12))
+    if not intensity_aug:
+        return tensor
     int_adc = [] if t2w_int_only else adc_idx
     return _apply_intensity_aug(tensor, t2w_idx, int_adc,
                                 noise_max=0.08, gamma_range=(0.75, 1.40),
@@ -222,51 +307,115 @@ class MaskGuidedDataset(Dataset):
       mask [32, 224, 224] — gland mask per slice (x[2::3]), same spatial augment
     """
     def __init__(self, records, augment=False, aug_strong=False, aug_scale=False, aug_t2w_only=False, no_hflip=False,
-                 gland_z_center=False, n_slices=32, input_size=224, data_root=DATA_ROOT):
-        self.augment        = augment
-        self.aug_strong     = aug_strong
-        self.aug_scale      = aug_scale
-        self.aug_t2w_only   = aug_t2w_only
-        self.no_hflip       = no_hflip
-        self.gland_z_center = gland_z_center
-        self.n_slices     = n_slices
-        self.input_size = input_size
+                 gland_z_center=False, n_slices=32, input_size=224,
+                 soft_mask_factor=0.0, n_ch_per_slice=3, bbox_crop=True,
+                 intensity_aug=False, cs_oversample=1, data_root=DATA_ROOT):
+        self.augment          = augment
+        self.aug_strong       = aug_strong
+        self.aug_scale        = aug_scale
+        self.aug_t2w_only     = aug_t2w_only
+        self.no_hflip         = no_hflip
+        self.intensity_aug    = intensity_aug
+        self.gland_z_center   = gland_z_center
+        self.n_slices         = n_slices
+        self.input_size       = input_size
+        self.soft_mask_factor = soft_mask_factor
+        self.n_ch_per_slice   = n_ch_per_slice
+        self.bbox_crop        = bbox_crop
         self.samples    = []
         for pid, label in records:
-            vols = load_patient(pid, data_root)
+            if bbox_crop:
+                vols = load_patient_bbox_crop(pid, n_slices=n_slices,
+                                              target_size=input_size, data_root=data_root)
+            else:
+                vols = load_patient(pid, data_root)
             self.samples.append((pid, label, vols))
+        if cs_oversample > 1:
+            cs = [(pid, lbl, v) for pid, lbl, v in self.samples if lbl == 1]
+            for _ in range(cs_oversample - 1):
+                self.samples.extend(cs)
+            random.shuffle(self.samples)
 
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
         pid, label, vols = self.samples[idx]
-        D = vols['t2w'].shape[2]
-        n = self.n_slices
+        n   = self.n_slices
+        sf  = self.soft_mask_factor
+        nch = self.n_ch_per_slice
 
-        if self.gland_z_center:
-            start = vols['cz'] - n // 2
+        if self.bbox_crop:
+            # vols already (target_size, target_size, n_slices) — direct channel stack
+            slices, gland_slices = [], []
+            for z in range(n):
+                g   = vols['gland'][:, :, z]
+                eff = g + (1.0 - g) * sf
+                if nch == 2:
+                    arr = np.stack([vols['t2w'][:, :, z] * eff,
+                                    vols['adc'][:, :, z] * eff], axis=0)
+                else:
+                    arr = np.stack([vols['t2w'][:, :, z] * eff,
+                                    vols['adc'][:, :, z] * eff, g], axis=0)
+                slices.append(torch.from_numpy(arr))
+                if nch == 2:
+                    gland_slices.append(torch.from_numpy(g[np.newaxis]))
+            tumor_vol = vols.get('tumor', np.zeros_like(vols['gland']))
+            tumor_2d  = torch.from_numpy(
+                tumor_vol.max(axis=2).astype(np.float32)
+            ).unsqueeze(0)  # [1, H, W]
         else:
-            start = (D - n) // 2 if D >= n else 0
-
-        slices = []
-        for i in range(n):
-            z = start + i
-            if 0 <= z < D:
-                slices.append(slice_to_tensor(vols, z, self.input_size))
+            D = vols['t2w'].shape[2]
+            if self.gland_z_center:
+                start = vols['cz'] - n // 2
             else:
-                slices.append(torch.zeros(3, self.input_size, self.input_size))
+                start = (D - n) // 2 if D >= n else 0
+            slices, gland_slices = [], []
+            for i in range(n):
+                z = start + i
+                if 0 <= z < D:
+                    slices.append(slice_to_tensor(vols, z, self.input_size, sf, nch))
+                    if nch == 2:
+                        g_sl = torch.from_numpy(vols['gland'][:, :, z][np.newaxis].astype(np.float32))
+                        gland_slices.append(_fov_crop_and_resize(g_sl, vols['cy'], vols['cx'], vols['spacing'], self.input_size))
+                else:
+                    slices.append(torch.zeros(nch, self.input_size, self.input_size))
+                    if nch == 2:
+                        gland_slices.append(torch.zeros(1, self.input_size, self.input_size))
+            tumor_2d = torch.zeros(1, self.input_size, self.input_size)
 
-        tensor = torch.cat(slices, dim=0)  # [96, H, W]
+        tensor = torch.cat(slices, dim=0)
 
-        if self.aug_strong:
-            tensor = augment_volume_tensor_strong(tensor, t2w_int_only=self.aug_t2w_only,
-                                                no_hflip=self.no_hflip)
-        elif self.aug_scale:
-            tensor = augment_volume_tensor_scale(tensor)
-        elif self.augment:
-            tensor = augment_volume_tensor(tensor, t2w_int_only=self.aug_t2w_only,
-                                           no_hflip=self.no_hflip)
-
-        mask = tensor[2::3]  # [32, H, W] — same spatial transform as tensor
-        return tensor, mask, label, pid
+        do_aug = self.aug_strong or self.aug_scale or self.augment
+        if nch == 2 and do_aug:
+            # interleave gland as 3rd ch per slice so spatial transforms stay consistent
+            H, W = self.input_size, self.input_size
+            t2 = tensor.view(n, 2, H, W)
+            gc = torch.cat(gland_slices, dim=0).view(n, 1, H, W)
+            aug_in = torch.cat([t2, gc], dim=1).view(n * 3, H, W)
+            if self.aug_strong:
+                aug_in = augment_volume_tensor_strong(aug_in, t2w_int_only=self.aug_t2w_only,
+                                                      no_hflip=self.no_hflip,
+                                                      intensity_aug=self.intensity_aug)
+            elif self.aug_scale:
+                aug_in = augment_volume_tensor_scale(aug_in)
+            else:
+                aug_in = augment_volume_tensor(aug_in, t2w_int_only=self.aug_t2w_only,
+                                               no_hflip=self.no_hflip,
+                                               intensity_aug=self.intensity_aug)
+            aug_in = aug_in.view(n, 3, H, W)
+            tensor = aug_in[:, :2].reshape(n * 2, H, W)
+            mask   = aug_in[:, 2]
+        else:
+            if self.aug_strong:
+                tensor = augment_volume_tensor_strong(tensor, t2w_int_only=self.aug_t2w_only,
+                                                      no_hflip=self.no_hflip,
+                                                      intensity_aug=self.intensity_aug)
+            elif self.aug_scale:
+                tensor = augment_volume_tensor_scale(tensor)
+            elif self.augment:
+                tensor = augment_volume_tensor(tensor, t2w_int_only=self.aug_t2w_only,
+                                               no_hflip=self.no_hflip,
+                                               intensity_aug=self.intensity_aug)
+            mask = tensor[2::3] if nch == 3 else torch.cat(gland_slices, dim=0)
+        return tensor, mask, tumor_2d, label, pid

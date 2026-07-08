@@ -29,7 +29,7 @@ _BUILDERS = {
 
 
 def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
-                head_dropout=0.2, head_depth=2, backbone='small'):
+                head_dropout=0.2, head_depth=2, backbone='small', n_ch_per_slice=3):
     ckpt_path = ckpt_path or CKPT_PATHS[backbone]
     model = _BUILDERS[backbone](num_classes=num_classes)
 
@@ -40,20 +40,21 @@ def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
         model.load_state_dict(state, strict=False)
         print(f"[model] Pretrained backbone loaded from {ckpt_path}")
 
-    # ── 1. Inflate first conv: 3ch → n_slices*3 ch ───────────────────────────
+    # ── 1. Inflate first conv: 3ch → n_slices*n_ch_per_slice ch ──────────────
     if n_slices > 1:
+        in_ch    = n_slices * n_ch_per_slice
         old_conv = model.stem[0].conv                   # Conv2d(3, 64, 3, stride=2, pad=1)
         old_w    = old_conv.weight.data                 # [64, 3, 3, 3]
         new_conv = nn.Conv2d(
-            n_slices * 3, old_conv.out_channels,
+            in_ch, old_conv.out_channels,
             kernel_size=old_conv.kernel_size,
             stride=old_conv.stride,
             padding=old_conv.padding,
             bias=False,
         )
-        new_conv.weight.data = old_w.repeat(1, n_slices, 1, 1) / n_slices
+        new_conv.weight.data = old_w[:, :n_ch_per_slice, :, :].repeat(1, n_slices, 1, 1) / n_slices
         model.stem[0].conv = new_conv
-        print(f"[model] First conv inflated: 3 → {n_slices*3} channels (weight tiling ÷{n_slices})")
+        print(f"[model] First conv inflated: {n_ch_per_slice} → {in_ch} channels (weight tiling ÷{n_slices})")
 
     # ── 2. Replace proj_head ─────────────────────────────────────────────────
     in_features = model.proj_head[0].in_features  # 1024
@@ -70,5 +71,12 @@ def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
     model.proj_head = nn.Sequential(*layers)
     arch = " → ".join(str(d) for d in dims)
     print(f"[model] backbone: MedViT_{backbone}  proj_head: {arch}  (dropout={head_dropout})")
+
+    # Lightweight probe: backbone bottleneck → [B,1,7,7] tumor attention map (train only)
+    model.tumor_probe = nn.Sequential(nn.Conv2d(1024, 1, 1, bias=False), nn.Sigmoid())
+    model.last_attn_map = None
+    def _probe_hook(m, inp, out):
+        model.last_attn_map = model.tumor_probe(out)
+    model.norm.register_forward_hook(_probe_hook)
 
     return model

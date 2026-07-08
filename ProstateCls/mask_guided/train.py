@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score, f1_score, confusion_matrix
+from sklearn.metrics import roc_auc_score, f1_score, confusion_matrix, roc_curve
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -25,18 +25,19 @@ from model import build_model
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, weight=None, gamma=2.0):
+    def __init__(self, weight=None, gamma=2.0, label_smoothing=0.0):
         super().__init__()
         self.weight = weight
         self.gamma  = gamma
+        self.label_smoothing = label_smoothing
 
     def forward(self, logits, targets):
-        log_p = F.log_softmax(logits, dim=1)
-        p_t   = torch.exp(log_p).gather(1, targets.unsqueeze(1)).squeeze(1)
-        loss  = -(1 - p_t) ** self.gamma * log_p.gather(1, targets.unsqueeze(1)).squeeze(1)
-        if self.weight is not None:
-            loss = self.weight[targets] * loss
-        return loss.mean()
+        log_p   = F.log_softmax(logits, dim=1)
+        p_t     = torch.exp(log_p).gather(1, targets.unsqueeze(1)).squeeze(1)
+        focal_w = (1 - p_t) ** self.gamma
+        loss_ce = F.cross_entropy(logits, targets, weight=self.weight,
+                                  label_smoothing=self.label_smoothing, reduction='none')
+        return (focal_w * loss_ce).mean()
 
 
 def set_seed(seed):
@@ -67,16 +68,43 @@ def compute_class_weights(labels, device, cspca_weight=0.0):
 
 
 def make_val_loader(records, args, nw):
-    ds = MaskGuidedDataset(records, augment=False, n_slices=args.n_slices)
+    n_ch = 3 if args.add_gland_ch else 2
+    ds = MaskGuidedDataset(records, augment=False, n_slices=args.n_slices,
+                           soft_mask_factor=args.soft_mask_factor, n_ch_per_slice=n_ch)
     return DataLoader(ds, batch_size=args.batch_size, shuffle=False,
                       num_workers=nw, pin_memory=True)
+
+
+class BalancedBatchSampler(torch.utils.data.Sampler):
+    """Yields batches with equal pos/neg samples; oversamples minority via replacement."""
+    def __init__(self, labels, batch_size):
+        self.pos = [i for i, l in enumerate(labels) if l == 1]
+        self.neg = [i for i, l in enumerate(labels) if l == 0]
+        self.batch_size = batch_size
+        self.half = batch_size // 2
+        self.n_batches = (len(self.neg) + self.half - 1) // self.half
+
+    def __len__(self):
+        return self.n_batches
+
+    def __iter__(self):
+        half, total = self.half, self.n_batches * self.half
+        pos_idx, neg_idx = [], []
+        while len(pos_idx) < total:
+            pos_idx += random.sample(self.pos, min(len(self.pos), total - len(pos_idx)))
+        while len(neg_idx) < total:
+            neg_idx += random.sample(self.neg, min(len(self.neg), total - len(neg_idx)))
+        for b in range(self.n_batches):
+            batch = pos_idx[b*half:(b+1)*half] + neg_idx[b*half:(b+1)*half]
+            random.shuffle(batch)
+            yield batch
 
 
 def eval_auc(model, loader, device):
     model.eval()
     all_labels, all_probs = [], []
     with torch.no_grad():
-        for imgs, masks, labels, _ in loader:
+        for imgs, masks, tumor_2d, labels, _ in loader:
             probs = torch.softmax(
                 model(imgs.to(device), masks.to(device)), dim=1)[:, 1].cpu().numpy()
             all_probs.extend(probs)
@@ -91,7 +119,8 @@ def make_optimizer(model, lr_backbone, lr_head, weight_decay):
     for name, param in model.named_parameters():
         if (name.startswith('backbone.stem.0.conv') or
                 name.startswith('proj_head') or
-                name.startswith('mask_branch')):
+                name.startswith('mask_branch') or
+                name.startswith('tumor_probe')):
             head_params.append(param)
         else:
             backbone_params.append(param)
@@ -109,23 +138,37 @@ def train_model(train_records, val_records, args, device, nw):
     print(f"Train: {len(train_records)} (csPCa={cs_tr}, ciPCa={len(train_records)-cs_tr})")
     print(f"Val:   {len(val_records)}   (csPCa={cs_val}, ciPCa={len(val_records)-cs_val})")
 
+    n_ch = 3 if args.add_gland_ch else 2
     train_ds = MaskGuidedDataset(train_records, augment=not args.aug_strong and not args.aug_scale,
                                  aug_strong=args.aug_strong,
                                  aug_scale=args.aug_scale,
                                  aug_t2w_only=args.aug_t2w_only, no_hflip=not args.hflip,
-                                 gland_z_center=args.gland_z_center, n_slices=args.n_slices)
+                                 gland_z_center=args.gland_z_center, n_slices=args.n_slices,
+                                 soft_mask_factor=args.soft_mask_factor, n_ch_per_slice=n_ch,
+                                 intensity_aug=args.intensity_aug,
+                                 cs_oversample=args.cs_oversample)
 
-    train_labels_arr = np.array([r[1] for r in train_records], dtype=np.float64)
+    train_labels_arr = np.array([s[1] for s in train_ds.samples], dtype=np.float64)
     counts  = np.bincount(train_labels_arr.astype(int))
+    cs_eff  = counts[1] if len(counts) > 1 else 0
+    print(f"  Effective train size: {len(train_ds)} (csPCa={cs_eff}, ciPCa={counts[0]})")
     weights = 1.0 / counts[train_labels_arr.astype(int)]
 
-    sampler      = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, sampler=sampler,
-                              num_workers=nw, pin_memory=True)
+    if args.cs_oversample > 1:
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                                  num_workers=nw, pin_memory=True)
+    elif args.balanced_batch:
+        bbs = BalancedBatchSampler(train_labels_arr.astype(int).tolist(), args.batch_size)
+        train_loader = DataLoader(train_ds, batch_sampler=bbs, num_workers=nw, pin_memory=True)
+    else:
+        sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, sampler=sampler,
+                                  num_workers=nw, pin_memory=True)
     val_loader   = make_val_loader(val_records, args, nw)
 
-    model = build_model(num_classes=2, pretrained=True, n_slices=args.n_slices,
-                        head_depth=args.head_depth, backbone=args.backbone)
+    n_ch  = 3 if args.add_gland_ch else 2
+    model = build_model(num_classes=2, pretrained=not args.scratch, n_slices=args.n_slices,
+                        head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=n_ch)
     model = model.to(device)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
@@ -144,8 +187,12 @@ def train_model(train_records, val_records, args, device, nw):
     ckpt_path = os.path.join(args.output_dir, 'best.pth')
     best_auc, best_epoch, patience_count = 0.0, 0, 0
 
-    core      = model.module if isinstance(model, nn.DataParallel) else model
-    optimizer = make_optimizer(core, args.lr_backbone, args.lr_head, args.weight_decay)
+    core = model.module if isinstance(model, nn.DataParallel) else model
+    if args.scratch:
+        optimizer = torch.optim.AdamW(core.parameters(), lr=args.lr_head, weight_decay=args.weight_decay)
+        print(f"  Optimizer: uniform LR={args.lr_head} (scratch mode)")
+    else:
+        optimizer = make_optimizer(core, args.lr_backbone, args.lr_head, args.weight_decay)
     if args.scheduler == 'cosine':
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=args.t_max, eta_min=1e-7)
@@ -168,35 +215,54 @@ def train_model(train_records, val_records, args, device, nw):
             patience_count = 0
             print(f"  Backbone unfrozen at epoch {epoch}  (patience reset)")
 
+        if args.stage2_epoch > 0 and epoch == args.stage2_epoch:
+            nat_sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+            train_loader = DataLoader(train_ds, batch_size=args.batch_size, sampler=nat_sampler,
+                                      num_workers=nw, pin_memory=True)
+            patience_count = 0
+            print(f"  Stage 2 at epoch {epoch}: switched to natural distribution sampling")
+
         if args.warmup_epochs > 0 and epoch <= args.warmup_epochs:
             scale = epoch / args.warmup_epochs
             for i, pg in enumerate(optimizer.param_groups):
                 pg['lr'] = target_lrs[i] * scale
 
         model.train()
-        running_loss = 0.0
-        for imgs, masks, lbls, _ in train_loader:
-            imgs, masks, lbls = imgs.to(device), masks.to(device), lbls.to(device)
+        if args.freeze_bn:
+            bn_src = model.backbone if hasattr(model, 'backbone') else model
+            for m in bn_src.modules():
+                if isinstance(m, nn.BatchNorm2d):
+                    m.eval()
+        running_loss = attn_l = 0.0
+        for imgs, masks, tumor_2d, lbls, _ in train_loader:
+            imgs, masks, lbls = imgs.to(device).contiguous(), masks.to(device).contiguous(), lbls.to(device)
             optimizer.zero_grad()
             loss = criterion(model(imgs, masks), lbls)
+            if args.attn_lambda > 0:
+                tumor_7   = (F.adaptive_max_pool2d(tumor_2d.to(device), 7) > 0.5).float()
+                loss_attn = F.binary_cross_entropy(core.last_attn_map, tumor_7)
+                loss = loss + args.attn_lambda * loss_attn
+                attn_l += loss_attn.item()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             running_loss += loss.item() * imgs.size(0)
 
         val_auc, _, _ = eval_auc(core, val_loader, device)
-        old_lr_hd = optimizer.param_groups[1]['lr']
+        old_lr_hd = optimizer.param_groups[-1]['lr']
         if epoch > args.warmup_epochs:
             if args.scheduler == 'cosine':
                 scheduler.step()
             else:
                 scheduler.step(val_auc)
-        new_lr_hd = optimizer.param_groups[1]['lr']
+        new_lr_hd = optimizer.param_groups[-1]['lr']
 
+        lr_str = (f"LR bb={optimizer.param_groups[0]['lr']:.1e} hd={new_lr_hd:.1e}"
+                  if len(optimizer.param_groups) > 1 else f"LR={new_lr_hd:.1e}")
+        attn_str = f" attn:{attn_l/len(train_loader):.4f}" if args.attn_lambda > 0 else ""
         print(f"  Epoch {epoch:3d}/{args.epochs} | "
-              f"loss: {running_loss/len(train_records):.4f} | "
-              f"val AUC: {val_auc:.4f} | "
-              f"LR bb={optimizer.param_groups[0]['lr']:.1e} hd={new_lr_hd:.1e}")
+              f"loss: {running_loss/len(train_records):.4f}{attn_str} | "
+              f"val AUC: {val_auc:.4f} | {lr_str}")
 
         if args.scheduler != 'cosine' and epoch > args.warmup_epochs and new_lr_hd < old_lr_hd:
             patience_count = 0
@@ -216,28 +282,33 @@ def train_model(train_records, val_records, args, device, nw):
     return best_auc, ckpt_path
 
 
-def evaluate_test(ckpt_path, test_records, args, device, nw):
+def evaluate_test(ckpt_path, test_records, val_records, args, device, nw):
     test_loader = make_val_loader(test_records, args, nw)
+    n_ch  = 3 if args.add_gland_ch else 2
     model = build_model(num_classes=2, pretrained=False, n_slices=args.n_slices,
-                        head_depth=args.head_depth, backbone=args.backbone)
-    model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
+                        head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=n_ch)
+    model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False), strict=False)
     model = model.to(device)
-    test_auc, test_labels, test_probs = eval_auc(model, test_loader, device)
 
-    preds = (test_probs >= 0.5).astype(int)
-    tn, fp, fn, tp = confusion_matrix(test_labels, preds, labels=[0, 1]).ravel()
-    sens = tp / (tp + fn) if (tp + fn) > 0 else 0
-    spec = tn / (tn + fp) if (tn + fp) > 0 else 0
-    f1   = f1_score(test_labels, preds, pos_label=1, zero_division=0)
+    val_loader = make_val_loader(val_records, args, nw)
+    _, val_labels, val_probs = eval_auc(model, val_loader, device)
+    _fpr, _tpr, _thr = roc_curve(val_labels, val_probs)
+    youden_thr = float(_thr[np.argmax(_tpr - _fpr)])
+
+    test_auc, test_labels, test_probs = eval_auc(model, test_loader, device)
 
     cs_test = sum(r[1] for r in test_records)
     print(f"\n=== TEST SET ({len(test_records)} patients: "
           f"csPCa={cs_test}, ciPCa={len(test_records)-cs_test}) ===")
-    print(f"AUC-ROC     : {test_auc:.4f}")
-    print(f"Sensitivity : {sens:.4f}")
-    print(f"Specificity : {spec:.4f}")
-    print(f"F1 (csPCa)  : {f1:.4f}")
-    print(f"TP={tp}  FP={fp}  TN={tn}  FN={fn}")
+    print(f"AUC-ROC     : {test_auc:.4f}  |  Youden thr: {youden_thr:.4f}")
+    for label, thr in [("0.500 ", 0.5), (f"{youden_thr:.3f}*", youden_thr)]:
+        preds = (test_probs >= thr).astype(int)
+        tn, fp, fn, tp = confusion_matrix(test_labels, preds, labels=[0, 1]).ravel()
+        sens = tp / (tp + fn) if (tp + fn) > 0 else 0
+        spec = tn / (tn + fp) if (tn + fp) > 0 else 0
+        f1   = f1_score(test_labels, preds, pos_label=1, zero_division=0)
+        print(f"  thr={label} → sens={sens:.4f}  spec={spec:.4f}  F1={f1:.4f}"
+              f"  TP={tp}  FP={fp}  TN={tn}  FN={fn}")
 
 
 def save_config(args, output_dir):
@@ -284,7 +355,7 @@ def main(args):
           f"test: {len(test_records)} (csPCa={cs_te})")
 
     best_auc, ckpt_path = train_model(train_records, val_records, args, device, nw)
-    evaluate_test(ckpt_path, test_records, args, device, nw)
+    evaluate_test(ckpt_path, test_records, val_records, args, device, nw)
 
 
 if __name__ == '__main__':
@@ -308,9 +379,13 @@ if __name__ == '__main__':
     parser.add_argument('--test-size',    type=float, default=0.15)
     parser.add_argument('--warmup-epochs', type=int,   default=0)
     parser.add_argument('--freeze-epochs', type=int,   default=0)
+    parser.add_argument('--freeze-bn',     action='store_true',
+                        help='Keep backbone BN layers in eval mode throughout training')
     parser.add_argument('--scheduler',    type=str,   default='rlrop',
                         choices=['rlrop', 'cosine'])
     parser.add_argument('--t-max',        type=int,   default=150)
+    parser.add_argument('--attn-lambda',    type=float, default=0.0,
+                        help='Weight of tumor attention probe loss (0=off; train only)')
     parser.add_argument('--output-dir',   type=str,   default='./output/split')
     parser.add_argument('--aug-t2w-only', action='store_true',
                         help='Intensity aug on T2W only; ADC gets spatial aug only')
@@ -324,4 +399,18 @@ if __name__ == '__main__':
                         help='Label smoothing epsilon (0=disabled, e.g. 0.1)')
     parser.add_argument('--gland-z-center', action='store_true',
                         help='Center 32-slice window on gland Z centroid instead of volume center')
+    parser.add_argument('--scratch',          action='store_true',
+                        help='Train from scratch — random init, uniform LR=lr-head')
+    parser.add_argument('--soft-mask-factor', type=float, default=0.0,
+                        help='Outside-gland intensity factor (0=hard zero, 0.1=soft)')
+    parser.add_argument('--add-gland-ch',   action='store_true',
+                        help='Use 3ch per slice (add explicit gland channel; default: 2ch T2W+ADC)')
+    parser.add_argument('--intensity-aug',    action='store_true',
+                        help='Enable intensity augmentation (noise, gamma, scale/shift; default: off)')
+    parser.add_argument('--cs-oversample',   type=int, default=1,
+                        help='Repeat csPCa samples N times with different aug (1=off, 5≈balance)')
+    parser.add_argument('--balanced-batch',  action='store_true',
+                        help='Strict 50/50 pos/neg batch sampler (oversamples minority)')
+    parser.add_argument('--stage2-epoch',    type=int, default=0,
+                        help='Epoch to switch from balanced to natural distribution sampling')
     main(parser.parse_args())

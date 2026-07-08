@@ -3,11 +3,11 @@
 #SBATCH -A r02144
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=40G
+#SBATCH --mem=80G
 #SBATCH -t 16:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ojyhi010402@gmail.com
-#SBATCH -D /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/seg_cls
+#SBATCH -D /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls
 
 PYTHON=/N/slate/ohjiye/envs/medvit/bin/python3
 WORKDIR=/geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/seg_cls
@@ -20,7 +20,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
         --job-name=$NAME \
         --output=$WORKDIR/logs/$NAME/%j.out \
         --error=$WORKDIR/logs/$NAME/%j.err \
-        --export=ALL,RUN_NAME=$NAME,EXTRA_ARGS="$EXTRA" \
+        --export=NONE,RUN_NAME=$NAME,EXTRA_ARGS="$EXTRA" \
         $0
     echo "▶ Submitted: $NAME  extra=${EXTRA:-none}"
     exit 0
@@ -37,11 +37,9 @@ $PYTHON -m seg_cls.train \
     --epochs 150 \
     --lr-backbone 1e-5 \
     --lr-head 3e-4 \
-    --lr-factor 0.5 \
-    --lr-patience 10 \
     --weight-decay 1e-4 \
     --patience 30 \
-    --batch-size 4 \
+    --batch-size 16 \
     --seed 42 \
     --n-slices 32 \
     --label-smoothing 0.1 \

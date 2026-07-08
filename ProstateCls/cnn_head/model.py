@@ -185,21 +185,24 @@ _HEAD_CLASSES = {'se': SEHead, 'cbam': CBAMHead, 'gem': GeMHead, 'ms': MSHead}
 class ProstateCNNModel(nn.Module):
     def __init__(self, backbone, cnn_head):
         super().__init__()
-        self.backbone = backbone
-        self.cnn_head = cnn_head
+        self.backbone     = backbone
+        self.cnn_head     = cnn_head
+        self.tumor_probe  = nn.Sequential(nn.Conv2d(1024, 1, 1, bias=False), nn.Sigmoid())
+        self.last_attn_map = None
 
     def forward(self, x):
         x = self.backbone.stem(x)
         for layer in self.backbone.features:
             x = layer(x)
-        x = self.backbone.norm(x)   # [B, 1024, 7, 7]
-        return self.cnn_head(x)
+        f4 = self.backbone.norm(x)              # [B, 1024, 7, 7]
+        self.last_attn_map = self.tumor_probe(f4)
+        return self.cnn_head(f4)
 
 
 # ── Builder ───────────────────────────────────────────────────────────────────
 
 def build_model(num_classes=2, pretrained=True, ckpt_path=None,
-                n_slices=32, head_type='cbam', dropout=0.3, backbone='small'):
+                n_slices=32, head_type='cbam', dropout=0.3, backbone='small', n_ch_per_slice=3):
     ckpt_path = ckpt_path or CKPT_PATHS[backbone]
 
     # Build backbone (MedViT keeps its proj_head but we never call it)
@@ -212,20 +215,21 @@ def build_model(num_classes=2, pretrained=True, ckpt_path=None,
         base.load_state_dict(state, strict=False)
         print(f"[model] Pretrained backbone loaded from {ckpt_path}")
 
-    # Inflate first conv 3 → n_slices*3 channels
+    # Inflate first conv 3 → n_slices*n_ch_per_slice channels
     if n_slices > 1:
+        in_ch    = n_slices * n_ch_per_slice
         old_conv = base.stem[0].conv
         old_w    = old_conv.weight.data
         new_conv = nn.Conv2d(
-            n_slices * 3, old_conv.out_channels,
+            in_ch, old_conv.out_channels,
             kernel_size=old_conv.kernel_size,
             stride=old_conv.stride,
             padding=old_conv.padding,
             bias=False,
         )
-        new_conv.weight.data = old_w.repeat(1, n_slices, 1, 1) / n_slices
+        new_conv.weight.data = old_w[:, :n_ch_per_slice, :, :].repeat(1, n_slices, 1, 1) / n_slices
         base.stem[0].conv = new_conv
-        print(f"[model] First conv inflated: 3 → {n_slices*3} channels (÷{n_slices})")
+        print(f"[model] First conv inflated: {n_ch_per_slice} → {in_ch} channels (÷{n_slices})")
 
     in_ch = _FEAT_CH[backbone]
     HeadCls = _HEAD_CLASSES[head_type]

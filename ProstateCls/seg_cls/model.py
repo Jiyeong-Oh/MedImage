@@ -79,10 +79,14 @@ class SpatialAttention(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv = nn.Conv2d(2, 1, 7, padding=3, bias=False)
+        self.last_map = None  # [B, 1, H, W] — set each forward pass
 
     def forward(self, x):
-        a = torch.cat([x.mean(1, keepdim=True), x.amax(1, keepdim=True)], dim=1)
-        return x * torch.sigmoid(self.conv(a))
+        a = torch.sigmoid(self.conv(
+            torch.cat([x.mean(1, keepdim=True), x.amax(1, keepdim=True)], dim=1)
+        ))  # [B, 1, H, W]
+        self.last_map = a
+        return x * a
 
 
 # ── Main model ────────────────────────────────────────────────────────────────
@@ -162,15 +166,16 @@ class SegClsModel(nn.Module):
         # constrain predictions to within-gland region
         tumor_pred = torch.sigmoid(seg_logits) * gland_2d
 
-        # ── Gland-gated classification ────────────────────────
-        # downsample gland mask to 7×7 and gate backbone features
+        # ── Gland + tumor gated classification ───────────────────
         gland_7 = F.adaptive_avg_pool2d(gland_2d, 7)        # [B, 1, 7, 7]
-        f4_gated = f4 * (gland_7 + 1e-3)                    # soft gate (never zero)
+        tumor_7 = F.adaptive_avg_pool2d(tumor_pred, 7)      # [B, 1, 7, 7]  no detach → cls grad → decoder
+        # tumor gate: amplifies tumor region; (1+tumor_7) ensures features never zeroed for ciPCa
+        f4_gated = f4 * (gland_7 + 1e-3) * (1.0 + tumor_7)
 
         f4_att = self.sp_attn(self.ch_attn(f4_gated))       # CBAM
         feat_cls = self.gap(f4_att)                          # [B, 1024, 1, 1]
 
-        seg_feat = self.seg_proj(tumor_pred.detach())        # [B, 64]  detach: stable cls training
+        seg_feat = self.seg_proj(tumor_pred.detach())        # [B, 64]  detach: avoid double-gradient path
 
         cls_input = torch.cat([feat_cls.flatten(1), seg_feat], dim=1)  # [B, 1088]
         cls_logits = self.classifier(cls_input)
@@ -181,7 +186,7 @@ class SegClsModel(nn.Module):
 # ── Builder ───────────────────────────────────────────────────────────────────
 
 def build_model(num_classes=2, pretrained=True, n_slices=32,
-                dropout=0.3, backbone='small'):
+                dropout=0.3, backbone='small', n_ch_per_slice=3):
     ckpt_path = CKPT_PATHS[backbone]
     base = _BUILDERS[backbone](num_classes=num_classes)
 
@@ -192,16 +197,17 @@ def build_model(num_classes=2, pretrained=True, n_slices=32,
         base.load_state_dict(state, strict=False)
         print(f"[model] Pretrained loaded: {ckpt_path}")
 
-    # inflate first conv 3→96ch
+    # inflate first conv → n_slices*n_ch_per_slice ch
+    in_ch    = n_slices * n_ch_per_slice
     old_conv = base.stem[0].conv
     new_conv  = nn.Conv2d(
-        n_slices * 3, old_conv.out_channels,
+        in_ch, old_conv.out_channels,
         kernel_size=old_conv.kernel_size,
         stride=old_conv.stride, padding=old_conv.padding, bias=False,
     )
-    new_conv.weight.data = old_conv.weight.data.repeat(1, n_slices, 1, 1) / n_slices
+    new_conv.weight.data = old_conv.weight.data[:, :n_ch_per_slice, :, :].repeat(1, n_slices, 1, 1) / n_slices
     base.stem[0].conv = new_conv
-    print(f"[model] First conv inflated: 3 → {n_slices*3} ch")
+    print(f"[model] First conv inflated: {n_ch_per_slice} → {in_ch} ch")
 
     # stage_out_idx depends on depths
     depths_map = {'small': [3,4,10,3], 'base': [3,4,20,3], 'large': [3,4,30,3]}

@@ -58,7 +58,8 @@ class ChannelAdaptedConv(nn.Module):
 
 
 def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
-                head_dropout=0.2, head_depth=2, backbone='small', adapter_mid_ch=0):
+                head_dropout=0.2, head_depth=2, backbone='small', adapter_mid_ch=0,
+                n_ch_per_slice=3):
     ckpt_path = ckpt_path or CKPT_PATHS[backbone]
     model = _BUILDERS[backbone](num_classes=num_classes)
 
@@ -72,8 +73,8 @@ def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
     # ── 1. Replace first conv with ChannelAdaptedConv ─────────────────────────
     if n_slices > 1:
         old_conv = model.stem[0].conv           # Conv2d(3, 64, 3, stride=2, pad=1)
-        model.stem[0].conv = ChannelAdaptedConv(n_slices * 3, old_conv, mid_ch=adapter_mid_ch)
-        in_ch = n_slices * 3
+        in_ch = n_slices * n_ch_per_slice
+        model.stem[0].conv = ChannelAdaptedConv(in_ch, old_conv, mid_ch=adapter_mid_ch)
         out_ch = old_conv.in_channels
         if adapter_mid_ch > 0:
             print(f"[model] Channel adapter: {in_ch} → {adapter_mid_ch} → {out_ch} → {old_conv.out_channels} "
@@ -93,5 +94,12 @@ def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
     model.proj_head = nn.Sequential(*layers)
     arch = " → ".join(str(d) for d in dims)
     print(f"[model] backbone: MedViT_{backbone}  proj_head: {arch}  (dropout={head_dropout})")
+
+    # Lightweight probe: backbone bottleneck → [B,1,7,7] tumor attention map (train only)
+    model.tumor_probe = nn.Sequential(nn.Conv2d(1024, 1, 1, bias=False), nn.Sigmoid())
+    model.last_attn_map = None
+    def _probe_hook(m, inp, out):
+        model.last_attn_map = model.tumor_probe(out)
+    model.norm.register_forward_hook(_probe_hook)
 
     return model
