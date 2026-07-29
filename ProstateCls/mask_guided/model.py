@@ -13,6 +13,7 @@ giving the model explicit spatial context about the 3D extent of the prostate.
 import sys
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 sys.path.insert(0, '/geode3/home/u070/ohjiye/Quartz/MedImage/MedViT')
 import MedViT as _medvit
@@ -33,6 +34,24 @@ FEAT_DIM = 1024
 MASK_DIM = 64
 
 
+class AttentionMaskHead(nn.Module):
+    """Attention pooling over f4 + mask context combination + linear classifier.
+    The attention map [B, 1, 7, 7] IS the classifier's spatial decision (end-to-end).
+    forward() returns (logits, attn).
+    """
+    def __init__(self, feat_dim=1024, mask_dim=64, num_classes=2):
+        super().__init__()
+        self.attn_conv  = nn.Conv2d(feat_dim, 1, 1, bias=False)
+        self.classifier = nn.Linear(feat_dim + mask_dim, num_classes)
+
+    def forward(self, f4, mask_ctx):
+        B, C, H, W = f4.shape
+        attn = F.softmax(self.attn_conv(f4).view(B, 1, -1), dim=2).view(B, 1, H, W)
+        feat = (attn * f4).sum(dim=[2, 3])                  # [B, C]
+        combined = torch.cat([feat, mask_ctx], dim=1)
+        return self.classifier(combined), attn
+
+
 class MaskGuidedModel(nn.Module):
     """
     Receives a fully-configured MedViT backbone (pretrained weights loaded,
@@ -43,11 +62,7 @@ class MaskGuidedModel(nn.Module):
         super().__init__()
         self.n_slices = n_slices
         self.backbone = backbone_medvit
-
-        # Expose norm for GradCAM hooks
-        self.norm = backbone_medvit.norm
-
-        self.tumor_probe  = nn.Sequential(nn.Conv2d(1024, 1, 1, bias=False), nn.Sigmoid())
+        self.norm     = backbone_medvit.norm
         self.last_attn_map = None
 
         # Mask context branch: per-slice prostate coverage → [B, 64]
@@ -57,30 +72,21 @@ class MaskGuidedModel(nn.Module):
             nn.Dropout(0.1),
         )
 
-        # Combined classification head [1024 + 64 → ... → num_classes]
-        combined_dim = FEAT_DIM + MASK_DIM
-        hidden = [512, 256, 128, 64][:head_depth]
-        dims   = [combined_dim] + hidden + [num_classes]
-        layers = []
-        for i in range(len(dims) - 2):
-            layers += [nn.Linear(dims[i], dims[i+1]), nn.GELU(), nn.Dropout(head_dropout)]
-        layers.append(nn.Linear(dims[-2], dims[-1]))
-        self.proj_head = nn.Sequential(*layers)
-
-        arch = " → ".join(str(d) for d in dims)
-        print(f"[model] backbone: MedViT  proj_head: {arch}  (dropout={head_dropout})")
+        # Attention pooling + combined classification (stored as proj_head for optimizer compat)
+        self.proj_head = AttentionMaskHead(FEAT_DIM, MASK_DIM, num_classes)
+        print(f"[model] backbone: MedViT  "
+              f"head: AttentionMaskHead(1024+64 → attn[7×7] + Linear → {num_classes})")
 
     def forward(self, x, mask):
         h = self.backbone.stem(x)
         for layer in self.backbone.features:
             h = layer(h)
         f4 = self.backbone.norm(h)                          # [B, 1024, 7, 7]
-        self.last_attn_map = self.tumor_probe(f4)           # [B, 1,    7, 7]
-        feats    = self.backbone.avgpool(f4).flatten(1)     # [B, 1024]
         mask_cov = mask.mean(dim=[2, 3])                    # [B, 32] per-slice coverage
         mask_ctx = self.mask_branch(mask_cov)               # [B, 64]
-        combined = torch.cat([feats, mask_ctx], dim=1)
-        return self.proj_head(combined)
+        logits, attn = self.proj_head(f4, mask_ctx)
+        self.last_attn_map = attn                           # [B, 1, 7, 7]
+        return logits
 
 
 def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,

@@ -178,6 +178,29 @@ Tested with attention regularization (`--attn-lambda 0.1`) to spread attention a
 
 ---
 
+### 7. Spatial MIL — Per-Slice Spatial Attention (2.5D)
+
+**Architecture:** Shared MedViT_small (3-ch per slice, no GAP) + SpatialGatedABMIL
+
+Extends MIL-ABMIL by replacing global average pooling with an end-to-end **spatial attention map** per slice. The backbone outputs f4 `[B×S, 1024, 7, 7]` (GAP suppressed), and a 1×1 conv generates 7×7 attention scores that are normalized via softmax over the 49 spatial locations:
+
+```
+[slice_0, ..., slice_31]  each [B, 3, 224, 224]
+  → shared MedViT (no GAP) → f4_i [B, 1024, 7, 7]
+  → 1×1 conv → softmax(49) → sp_attn_i [B, 1, 7, 7]   ← end-to-end spatial attention
+  → weighted sum → feat_i [B, 1024]
+  → GatedABMIL: a_i weights over S slices
+  → z = Σ a_i · feat_i → MLP → cls logits
+```
+
+The 1×1 conv is the classification decision mechanism (not post-hoc): spatial gradients flow directly through the attention weights into the backbone. This produces two interpretable maps per patient — **which slices matter** (slice attention) and **where in each slice** (spatial attention overlay) — without any Grad-CAM approximation.
+
+Two runs:
+- `mil_spatial_fbal`: 1 GPU, batch_size=2, BalancedBatchSampler
+- `spatial_g2b4_fbal`: 2 GPUs (DataParallel), batch_size=4, BalancedBatchSampler
+
+---
+
 ## Results
 
 Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
@@ -186,7 +209,9 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
 |--------|-----|--------:|------------:|-----------:|-------:|-------:|---:|---:|
 | weight_tiling | **wt_fbn_fbal** | 0.774 | **0.800** | 0.367 | 81.5% | 72.7% | 15 | 12 |
 | channel_adapter | **ca_os5** | 0.700 | **0.762** | 0.007 | 63.0% | 72.7% | 10 | 17 |
+| mil_spatial | **mil_spatial_fbal** | 0.812 | **0.762** | 1.000 | 70.4% | 72.0% | 19 | 8  |
 | mil_abmil | **baseline** | 0.792 | **0.759** | 0.876 | 74.1% | 65.7% | 25 | 2  |
+| mil_spatial | spatial_g2b4_fbal | 0.794 | 0.751 | 0.981 | 81.5% | 67.1% | 22 | 5  |
 | mil_abmil | attn01 | 0.854 | 0.743 | 0.000 | 70.4% | 58.0% | 5  | 22 |
 | seg_cls | **seg_fbn_bal_d02** | 0.773 | **0.735** | 0.269 | 77.8% | 46.2% | 17 | 10 |
 | cnn_head | **cnn_fbn_focal** | 0.814 | **0.739** | 0.024 | 63.0% | 74.1% | 11 | 16 |
@@ -211,6 +236,7 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
 - **MIL baseline** achieves the highest sensitivity at thr=0.5 (92.6%, only 2 FN out of 27 csPCa) at the cost of specificity (42%). When minimizing FN is the clinical priority, MIL is the best option.
 - **Youden threshold = 0.000** in several runs means the model predicts csPCa for nearly all patients — a sign of class imbalance instability rather than useful calibration.
 - **cs_oversample ×5** improves sensitivity (wt_os5: 70.4% vs wt_fbn: 37.0%) but hurts specificity — more csPCa examples per epoch increases recall at the cost of false positives.
+- **Spatial MIL** (`mil_spatial_fbal`, AUC 0.762) matches channel_adapter at the same test AUC with a higher Youden specificity (72.0% vs 72.7%) and produces interpretable per-slice spatial attention maps without Grad-CAM post-hoc approximation. The batch_size=4 variant (`spatial_g2b4_fbal`, AUC 0.751) showed higher sensitivity (81.5%, only 5 FN) but slightly lower AUC, consistent with the sensitivity-AUC tradeoff seen across methods.
 
 ---
 

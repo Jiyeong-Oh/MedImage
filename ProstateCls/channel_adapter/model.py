@@ -11,8 +11,10 @@ Contrast with ../model.py (weight tiling): pretrained 3ch weights are tiled 32×
 divided by 32 to initialize a new Conv2d(96→64, 3×3).
 """
 import sys
+import types
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 sys.path.insert(0, '/geode3/home/u070/ohjiye/Quartz/MedImage/MedViT')
 import MedViT as _medvit
@@ -29,6 +31,20 @@ _BUILDERS = {
     'base':  _medvit.MedViT_base,
     'large': _medvit.MedViT_large,
 }
+
+
+class AttentionPoolingHead(nn.Module):
+    """Spatial attention pooling — replaces GAP+MLP for end-to-end interpretable attention."""
+    def __init__(self, in_features=1024, num_classes=2):
+        super().__init__()
+        self.attn_conv  = nn.Conv2d(in_features, 1, 1, bias=False)
+        self.classifier = nn.Linear(in_features, num_classes)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        attn = F.softmax(self.attn_conv(x).view(B, 1, -1), dim=2).view(B, 1, H, W)
+        feat = (attn * x).sum(dim=[2, 3])
+        return self.classifier(feat), attn
 
 
 class ChannelAdaptedConv(nn.Module):
@@ -83,23 +99,22 @@ def build_model(num_classes=2, pretrained=True, ckpt_path=None, n_slices=32,
             print(f"[model] Channel adapter: {in_ch} → {out_ch} → {old_conv.out_channels} "
                   f"(1-layer 1×1 + pretrained 3×3)")
 
-    # ── 2. Replace proj_head ─────────────────────────────────────────────────
-    in_features = model.proj_head[0].in_features  # 1024
-    hidden = [512, 256, 128, 64][:head_depth]
-    dims   = [in_features] + hidden + [num_classes]
-    layers = []
-    for i in range(len(dims) - 2):
-        layers += [nn.Linear(dims[i], dims[i+1]), nn.GELU(), nn.Dropout(head_dropout)]
-    layers.append(nn.Linear(dims[-2], dims[-1]))
-    model.proj_head = nn.Sequential(*layers)
-    arch = " → ".join(str(d) for d in dims)
-    print(f"[model] backbone: MedViT_{backbone}  proj_head: {arch}  (dropout={head_dropout})")
-
-    # Lightweight probe: backbone bottleneck → [B,1,7,7] tumor attention map (train only)
-    model.tumor_probe = nn.Sequential(nn.Conv2d(1024, 1, 1, bias=False), nn.Sigmoid())
+    # ── 2. Replace proj_head with AttentionPoolingHead ────────────────────────
+    in_features     = model.proj_head[0].in_features   # 1024
+    model.proj_head = AttentionPoolingHead(in_features, num_classes)
     model.last_attn_map = None
-    def _probe_hook(m, inp, out):
-        model.last_attn_map = model.tumor_probe(out)
-    model.norm.register_forward_hook(_probe_hook)
+
+    def _forward(self, x):
+        x = self.stem(x)
+        for layer in self.features:
+            x = layer(x)
+        x = self.norm(x)                    # [B, 1024, 7, 7]
+        logits, attn = self.proj_head(x)
+        self.last_attn_map = attn
+        return logits
+
+    model.forward = types.MethodType(_forward, model)
+    print(f"[model] backbone: MedViT_{backbone}  "
+          f"head: AttentionPoolingHead(1024 → attn[7×7] + Linear → {num_classes})")
 
     return model

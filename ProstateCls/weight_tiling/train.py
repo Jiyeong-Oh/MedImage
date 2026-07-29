@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 # dataset.py is in the parent ProstateCls/ directory
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from dataset import PatientVolumeDataset, load_labels
-from model import build_model
+from model import build_model, AttentionPoolingHead
 
 
 class FocalLoss(nn.Module):
@@ -120,11 +120,11 @@ def make_optimizer(model, lr_backbone, lr_head, weight_decay):
     head_params, backbone_params = [], []
     for name, param in model.named_parameters():
         if (name.startswith('stem.0.conv') or name.startswith('proj_head')
-                or name.startswith('tumor_probe')):
+                or name.startswith('f3_norm')):
             head_params.append(param)
         else:
             backbone_params.append(param)
-    print(f"  Optimizer: backbone LR={lr_backbone}, head(stem+proj) LR={lr_head}")
+    print(f"  Optimizer: backbone LR={lr_backbone}, head(stem+proj+f3_norm) LR={lr_head}")
     return torch.optim.AdamW([
         {'params': backbone_params, 'lr': lr_backbone},
         {'params': head_params,     'lr': lr_head},
@@ -199,7 +199,8 @@ def train_model(train_records, val_records, args, device, nw):
 
     n_ch  = 3 if args.add_gland_ch else 2
     model = build_model(num_classes=2, pretrained=not args.scratch, n_slices=args.n_slices,
-                        head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=n_ch)
+                        head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=n_ch,
+                        high_res=args.high_res)
     model = model.to(device)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
@@ -269,8 +270,9 @@ def train_model(train_records, val_records, args, device, nw):
             optimizer.zero_grad()
             loss = criterion(model(imgs), lbls)
             if args.attn_lambda > 0:
-                tumor_7   = (F.adaptive_max_pool2d(tumor_2d.to(device), 7) > 0.5).float()
-                loss_attn = F.binary_cross_entropy(core.last_attn_map, tumor_7)
+                attn_sz   = core.last_attn_map.shape[-1]  # 7 (standard) or 14 (high-res)
+                tumor_t   = (F.adaptive_max_pool2d(tumor_2d.to(device), attn_sz) > 0.5).float()
+                loss_attn = F.binary_cross_entropy(core.last_attn_map, tumor_t)
                 loss = loss + args.attn_lambda * loss_attn
                 attn_l += loss_attn.item()
             loss.backward()
@@ -324,7 +326,8 @@ def evaluate_test(ckpt_path, test_records, val_records, args, device, nw):
     test_loader = make_val_loader(test_records, args, nw)
     n_ch  = 3 if args.add_gland_ch else 2
     model = build_model(num_classes=2, pretrained=False, n_slices=args.n_slices,
-                        head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=n_ch)
+                        head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=n_ch,
+                        high_res=args.high_res)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False), strict=False)
     model = model.to(device)
 
@@ -352,15 +355,21 @@ def evaluate_test(ckpt_path, test_records, val_records, args, device, nw):
 def save_config(args, output_dir):
     n_ch = 3 if args.add_gland_ch else 2
     tmp = build_model(num_classes=2, pretrained=False, n_slices=args.n_slices,
-                      head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=n_ch)
-    head_layers = []
-    for m in tmp.proj_head:
-        if isinstance(m, nn.Linear):
-            head_layers.append(f"Linear({m.in_features}→{m.out_features})")
-        elif isinstance(m, nn.Dropout):
-            head_layers.append(f"Dropout(p={m.p})")
-        else:
-            head_layers.append(type(m).__name__)
+                      head_depth=args.head_depth, backbone=args.backbone, n_ch_per_slice=n_ch,
+                      high_res=args.high_res)
+    if isinstance(tmp.proj_head, AttentionPoolingHead):
+        grid = "14x14" if args.high_res else "7x7"
+        ch   = 512 if args.high_res else 1024
+        head_layers = [f"AttentionPoolingHead({ch} → attn[{grid}] + Linear → 2)"]
+    else:
+        head_layers = []
+        for m in tmp.proj_head:
+            if isinstance(m, nn.Linear):
+                head_layers.append(f"Linear({m.in_features}->{m.out_features})")
+            elif isinstance(m, nn.Dropout):
+                head_layers.append(f"Dropout(p={m.p})")
+            else:
+                head_layers.append(type(m).__name__)
     del tmp
 
     config = {
@@ -473,5 +482,7 @@ if __name__ == '__main__':
                         help='Epoch to switch from balanced to natural distribution sampling')
     parser.add_argument('--attn-lambda',    type=float, default=0.0,
                         help='Weight of tumor attention probe loss (0=off; train only)')
+    parser.add_argument('--high-res',       action='store_true',
+                        help='Use f3 [B,512,14x14] for attention instead of f4 [B,1024,7x7]')
     parser.add_argument('--output-dir',   type=str,   default='./output/split')
     main(parser.parse_args())

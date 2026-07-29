@@ -182,12 +182,25 @@ _HEAD_CLASSES = {'se': SEHead, 'cbam': CBAMHead, 'gem': GeMHead, 'ms': MSHead}
 
 # ── Wrapper model ─────────────────────────────────────────────────────────────
 
+class AttentionPoolingHead(nn.Module):
+    """Spatial attention pooling — end-to-end interpretable classifier attention."""
+    def __init__(self, in_features=1024, num_classes=2):
+        super().__init__()
+        self.attn_conv  = nn.Conv2d(in_features, 1, 1, bias=False)
+        self.classifier = nn.Linear(in_features, num_classes)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        attn = F.softmax(self.attn_conv(x).view(B, 1, -1), dim=2).view(B, 1, H, W)
+        feat = (attn * x).sum(dim=[2, 3])
+        return self.classifier(feat), attn
+
+
 class ProstateCNNModel(nn.Module):
     def __init__(self, backbone, cnn_head):
         super().__init__()
-        self.backbone     = backbone
-        self.cnn_head     = cnn_head
-        self.tumor_probe  = nn.Sequential(nn.Conv2d(1024, 1, 1, bias=False), nn.Sigmoid())
+        self.backbone      = backbone
+        self.cnn_head      = cnn_head       # AttentionPoolingHead
         self.last_attn_map = None
 
     def forward(self, x):
@@ -195,8 +208,9 @@ class ProstateCNNModel(nn.Module):
         for layer in self.backbone.features:
             x = layer(x)
         f4 = self.backbone.norm(x)              # [B, 1024, 7, 7]
-        self.last_attn_map = self.tumor_probe(f4)
-        return self.cnn_head(f4)
+        logits, attn = self.cnn_head(f4)
+        self.last_attn_map = attn               # [B, 1, 7, 7]
+        return logits
 
 
 # ── Builder ───────────────────────────────────────────────────────────────────
@@ -232,8 +246,8 @@ def build_model(num_classes=2, pretrained=True, ckpt_path=None,
         print(f"[model] First conv inflated: {n_ch_per_slice} → {in_ch} channels (÷{n_slices})")
 
     in_ch = _FEAT_CH[backbone]
-    HeadCls = _HEAD_CLASSES[head_type]
-    head = HeadCls(in_ch, num_classes=num_classes, dropout=dropout)
-    print(f"[model] CNN head: {head_type.upper()}  backbone: MedViT_{backbone}")
+    head  = AttentionPoolingHead(in_ch, num_classes=num_classes)
+    print(f"[model] backbone: MedViT_{backbone}  "
+          f"head: AttentionPoolingHead(1024 → attn[7×7] + Linear → {num_classes})")
 
     return ProstateCNNModel(base, head)

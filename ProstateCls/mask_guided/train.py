@@ -119,8 +119,7 @@ def make_optimizer(model, lr_backbone, lr_head, weight_decay):
     for name, param in model.named_parameters():
         if (name.startswith('backbone.stem.0.conv') or
                 name.startswith('proj_head') or
-                name.startswith('mask_branch') or
-                name.startswith('tumor_probe')):
+                name.startswith('mask_branch')):
             head_params.append(param)
         else:
             backbone_params.append(param)

@@ -28,7 +28,7 @@ from dataset import PatientVolumeDataset, load_labels
 
 # local channel-adapter model
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from model import build_model
+from model import build_model, AttentionPoolingHead
 
 
 class FocalLoss(nn.Module):
@@ -126,7 +126,7 @@ def make_optimizer(model, lr_backbone, lr_head, lr_adapter, weight_decay):
     for name, param in model.named_parameters():
         if 'stem.0.conv.adapter' in name:
             adapter_params.append(param)
-        elif name.startswith('proj_head') or name.startswith('tumor_probe'):
+        elif name.startswith('proj_head'):
             proj_params.append(param)
         else:
             backbone_params.append(param)
@@ -334,14 +334,17 @@ def save_config(args, output_dir):
     tmp = build_model(num_classes=2, pretrained=False, n_slices=args.n_slices,
                       head_depth=args.head_depth, backbone=args.backbone,
                       adapter_mid_ch=args.adapter_mid_ch, n_ch_per_slice=n_ch)
-    head_layers = []
-    for m in tmp.proj_head:
-        if isinstance(m, nn.Linear):
-            head_layers.append(f"Linear({m.in_features}→{m.out_features})")
-        elif isinstance(m, nn.Dropout):
-            head_layers.append(f"Dropout(p={m.p})")
-        else:
-            head_layers.append(type(m).__name__)
+    if isinstance(tmp.proj_head, AttentionPoolingHead):
+        head_layers = ["AttentionPoolingHead(1024 → attn[7x7] + Linear → 2)"]
+    else:
+        head_layers = []
+        for m in tmp.proj_head:
+            if isinstance(m, nn.Linear):
+                head_layers.append(f"Linear({m.in_features}->{m.out_features})")
+            elif isinstance(m, nn.Dropout):
+                head_layers.append(f"Dropout(p={m.p})")
+            else:
+                head_layers.append(type(m).__name__)
     del tmp
 
     config = {

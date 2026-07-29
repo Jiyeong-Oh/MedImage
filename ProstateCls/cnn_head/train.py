@@ -115,8 +115,7 @@ def eval_auc(model, loader, device):
 def make_optimizer(model, lr_backbone, lr_head, weight_decay):
     head_params, backbone_params = [], []
     for name, param in model.named_parameters():
-        if (name.startswith('backbone.stem.0.conv') or name.startswith('cnn_head')
-                or name.startswith('tumor_probe')):
+        if name.startswith('backbone.stem.0.conv') or name.startswith('cnn_head'):
             head_params.append(param)
         else:
             backbone_params.append(param)

@@ -7,31 +7,29 @@
 #SBATCH -t 12:00:00
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=ojyhi010402@gmail.com
-#SBATCH -D /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/weight_tiling
+#SBATCH -D /geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/mil_abmil
 
 PYTHON=/N/slate/ohjiye/envs/medvit/bin/python3
-WORKDIR=/geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/weight_tiling
+WORKDIR=/geode3/home/u070/ohjiye/Quartz/MedImage/ProstateCls/mil_abmil
 
-# ── Launcher (run locally: bash 0_submit.sh <name> [extra-args]) ──────────────
-# Default (no extra-args) = deeper_head: CE loss, head_depth=2, backbone=small
-# e.g.  bash 0_submit.sh focal_deep "--focal-gamma 2.0 --head-depth 3"
-#        bash 0_submit.sh base_ce   "--backbone base"
-#        bash 0_submit.sh large_ce  "--backbone large"
+# Usage: bash 0_submit.sh <run-name> [extra-args]
+# e.g.  bash 0_submit.sh baseline
+#        bash 0_submit.sh focal "--focal-gamma 2.0"
+#        bash 0_submit.sh attn  "--attn-lambda 0.1"
 if [ -z "$SLURM_JOB_ID" ]; then
     NAME=${1:?Usage: bash 0_submit.sh <run-name> [extra-args]}
     EXTRA=${2:-}
     mkdir -p $WORKDIR/logs/$NAME $WORKDIR/output/$NAME $WORKDIR/figures/$NAME
     sbatch \
-        --job-name=$NAME \
+        --job-name=mil_$NAME \
         --output=$WORKDIR/logs/$NAME/%j.out \
         --error=$WORKDIR/logs/$NAME/%j.err \
         --export=NONE,RUN_NAME=$NAME,EXTRA_ARGS="$EXTRA" \
         $0
-    echo "▶ Submitted: $NAME  extra=${EXTRA:-none}"
+    echo "▶ Submitted: mil_$NAME  extra=${EXTRA:-none}"
     exit 0
 fi
 
-# ── SLURM job body ────────────────────────────────────────────────────────────
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node:   $SLURMD_NODENAME"
 echo "GPU:    $CUDA_VISIBLE_DEVICES"
@@ -41,17 +39,16 @@ echo "Start:  $(date)"
 
 $PYTHON $WORKDIR/train.py \
     --epochs 150 \
+    --batch-size 8 \
     --lr-backbone 1e-5 \
     --lr-head 3e-4 \
-    --lr-factor 0.5 \
-    --lr-patience 10 \
     --weight-decay 1e-4 \
     --patience 30 \
-    --batch-size 32 \
     --seed 42 \
     --n-slices 32 \
     --val-size 0.15 \
     --test-size 0.15 \
+    --freeze-bn \
     --output-dir $WORKDIR/output/$RUN_NAME \
     $EXTRA_ARGS
 
