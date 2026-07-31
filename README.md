@@ -238,7 +238,7 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
 | Method | Run | Val AUC | **Test AUC** | Youden thr | Sens@Y | Spec@Y | TP | FN |
 |--------|-----|--------:|------------:|-----------:|-------:|-------:|---:|---:|
 | weight_tiling | **wt_fbn_fbal** | 0.774 | **0.800** | 0.367 | 81.5% | 72.7% | 15 | 12 |
-| mil_spatial | **spatial_gm_fbal** | 0.788 | **0.780** | 0.864 | 85.2% | 60.8% | 23 | 4  |
+| mil_spatial | **spatial_gm_fbal** ★ | 0.788 | **0.780** | 0.864 | 85.2% | 60.8% | 23 | 4  |
 | channel_adapter | **ca_os5** | 0.700 | **0.762** | 0.007 | 63.0% | 72.7% | 10 | 17 |
 | mil_spatial | **mil_spatial_fbal** | 0.812 | **0.762** | 1.000 | 70.4% | 72.0% | 19 | 8  |
 | mil_abmil | **baseline** | 0.792 | **0.759** | 0.876 | 74.1% | 65.7% | 25 | 2  |
@@ -258,7 +258,7 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
 | weight_tiling | wt_os5_cw4 | 0.762 | 0.649 | 0.002 | 63.0% | 66.4% | 6  | 21 |
 | mask_guided | mg_os5 | 0.734 | 0.603 | 0.000 | 40.7% | 65.7% | 4  | 23 |
 
-**Bold run** = best per method. TP/FN out of 27 csPCa test patients.
+**Bold run** = best per method. ★ = best Spatial MIL run (ongoing tuning). TP/FN out of 27 csPCa test patients.
 
 ### Key Observations
 
@@ -274,41 +274,56 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
 
 ## Visualizations
 
-### Best model: `wt_fbn_fbal` (Test AUC 0.800)
+### Current best Spatial MIL: `spatial_gm_fbal` ★ (Test AUC 0.780)
 
 | ROC & PR Curve | Learning Curve | Confusion Matrix |
 |:-:|:-:|:-:|
-| ![ROC](ProstateCls/weight_tiling/figures/wt_fbn_fbal/roc_pr_curve.png) | ![LR](ProstateCls/weight_tiling/figures/wt_fbn_fbal/learning_curve.png) | ![CM](ProstateCls/weight_tiling/figures/wt_fbn_fbal/confusion_matrix.png) |
+| ![ROC](ProstateCls/mil_abmil/figures/spatial_gm_fbal/roc_pr_curve.png) | ![LR](ProstateCls/mil_abmil/figures/spatial_gm_fbal/learning_curve.png) | ![CM](ProstateCls/mil_abmil/figures/spatial_gm_fbal/confusion_matrix.png) |
 
-### Grad-CAM: `wt_fbn_fbal` — csPCa Examples
+### Spatial Attention Maps: `spatial_gm_fbal`
 
-Each row shows: **T2W MRI · Saliency map · Saliency overlay · Tumor mask** (red contour).  
-Green title = True Positive · Red title = False Negative (missed).
+Each GIF shows all 32 axial slices: **T2W MRI · Spatial attention overlay (gland-masked) · ABMIL slice weight bar**.  
+Spatial attention is constrained within the prostate gland boundary.  
+Cyan contour = tumor region · Color bar = current slice highlighted in gold.
 
-**Patient 10085** · Slice 11 (TP, p=0.764)
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10085_1000085_z11.png)
+#### ✅ True Positive — csPCa correctly detected
 
-**Patient 10085** · Slice 12 (TP, p=0.764)
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10085_1000085_z12.png)
+**Patient 11155** (p=0.977)
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_11155_1001178.gif)
 
-**Patient 10970** · Slice 10 (TP, p=0.753) — strong focal alignment with tumor
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10970_1000989_z10.png)
+**Patient 11165** (p=0.969)
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_11165_1001188.gif)
 
-**Patient 10970** · Slice 14 (TP, p=0.753)
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10970_1000989_z14.png)
+**Patient 11448** (p=0.959)
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_11448_1001472.gif)
 
-**Patient 10867** · Slice 9 (TP, p=0.767)
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10867_1000883_z09.png)
+#### ❌ False Negative — csPCa missed
 
-**Patient 10372** · Slice 10 (FN, p=0.457) — missed csPCa
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10372_1000378_z10.png)
+**Patient 10019** (p=0.017) — model highly confident ciPCa
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_10019_1000019.gif)
 
-**Patient 10372** · Slice 11 (FN, p=0.457)
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10372_1000378_z11.png)
+**Patient 10418** (p=0.100) — low-confidence miss
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_10418_1000426.gif)
 
-**Patient 10289** · Slice 21 (FN, p=0.428)
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10289_1000295_z21.png)
+#### ⚠️ False Positive — ciPCa incorrectly flagged
 
-**Patient 10289** · Slice 22 (FN, p=0.428)
-![](ProstateCls/weight_tiling/figures/wt_fbn_fbal/gradcam/gradcam_10289_1000295_z22.png)
+**Patient 11052** (p=0.975) — model highly confident csPCa
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_11052_1001072.png)
+
+**Patient 10734** (p=0.972)
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_10734_1000750.png)
+
+**Patient 11287** (p=0.968)
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_11287_1001310.png)
+
+#### ✅ True Negative — ciPCa correctly dismissed
+
+**Patient 10099** (p=0.000) — model highly confident ciPCa
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_10099_1000099.png)
+
+**Patient 10870** (p=0.000)
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_10870_1000886.png)
+
+**Patient 11221** (p=0.000)
+![](ProstateCls/mil_abmil/figures/spatial_gm_fbal/attention/attn_11221_1001244.png)
 
