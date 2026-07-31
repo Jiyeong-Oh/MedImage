@@ -82,14 +82,23 @@ class SpatialGatedABMIL(nn.Module):
         self.last_spatial_attn = None  # [B, S, 1, H, W]
         self.last_slice_attn   = None  # [B, S]
 
-    def forward(self, feat_maps, n_slices):
+    def forward(self, feat_maps, n_slices, gland_7=None):
         # feat_maps: [B*S, C, H, W]
+        # gland_7:   [B*S, 1, 7, 7] float 0-1, or None
         BS, C, H, W = feat_maps.shape
         B = BS // n_slices
         S = n_slices
 
         # 1. Spatial attention per slice: softmax over H*W locations
         sp_logit = self.sp_attn_conv(feat_maps)                         # [B*S, 1, H, W]
+
+        if gland_7 is not None:
+            outside = (gland_7 < 0.05)                                  # [B*S, 1, H, W]
+            # Slices where the gland is entirely absent → don't mask (fall back to uniform)
+            all_outside = outside.view(BS, -1).all(dim=1)               # [B*S]
+            outside = outside & (~all_outside).view(BS, 1, 1, 1)
+            sp_logit = sp_logit.masked_fill(outside, float('-inf'))
+
         sp_attn  = F.softmax(sp_logit.view(BS, 1, -1), dim=2).view(BS, 1, H, W)
 
         # 2. Spatially-weighted per-slice feature
@@ -139,10 +148,15 @@ class SpatialMILModel(nn.Module):
         return self.backbone.norm(x)  # [N, 1024, 7, 7]
 
     def forward(self, x):
-        # x: [B, S, C, H, W]
+        # x: [B, S, C, H, W]  — channel 2 is gland mask when nch=3 (spatial_gm runs)
         B, S, C, H, W = x.shape
+        if C >= 3:
+            gland_7 = F.adaptive_avg_pool2d(
+                x[:, :, 2:3, :, :].reshape(B * S, 1, H, W), (7, 7))   # [B*S, 1, 7, 7]
+        else:
+            gland_7 = None  # nch=2 (old runs without gland masking)
         feat_maps = self._extract_features(x.reshape(B * S, C, H, W))  # [B*S, 1024, 7, 7]
-        logits, slice_attn, _ = self.aggregator(feat_maps, n_slices=S)
+        logits, slice_attn, _ = self.aggregator(feat_maps, n_slices=S, gland_7=gland_7)
         return logits, slice_attn
 
 

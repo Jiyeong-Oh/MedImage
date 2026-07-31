@@ -37,6 +37,8 @@ echo "Run:    $RUN_NAME"
 echo "Extra:  ${EXTRA_ARGS:-none}"
 echo "Start:  $(date)"
 
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 $PYTHON $WORKDIR/train.py \
     --epochs 150 \
     --batch-size 8 \

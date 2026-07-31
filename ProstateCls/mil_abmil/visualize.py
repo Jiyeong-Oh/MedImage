@@ -124,6 +124,8 @@ def main(args):
         stratify=ltv, random_state=args.seed)
 
     # ── 3. Load model ─────────────────────────────────────────────────────────
+    if args.spatial_attn:
+        args.add_gland_ch = True  # gland channel required for spatial mask inference
     nch = 3 if args.add_gland_ch else 2
     model = build_model(nch=nch, backbone=args.backbone,
                         abmil_hidden=args.abmil_hidden,
@@ -249,6 +251,7 @@ def main(args):
             vols      = load_viz_volumes(pid, n_slices=args.n_slices)
             t2w_vol   = vols['t2w']    # [H, W, n_slices]
             tumor_vol = vols['tumor']
+            gland_vol = vols['gland']  # [H, W, n_slices]  for spatial attn clipping
             H_img, W_img = t2w_vol.shape[:2]
 
             tumor_slices = [z for z in range(args.n_slices) if tumor_vol[:,:,z].sum() > 0]
@@ -288,6 +291,7 @@ def main(args):
                 for rank, zi in enumerate(top_k):
                     ax = fig.add_subplot(gs[2, rank])
                     sp_up = _upsample_spatial_attn(sp_attn[zi], H_img, W_img)
+                    sp_up = sp_up * (gland_vol[:, :, zi] > 0.05)  # clip to gland
                     ax.imshow(t2w_vol[:, :, zi], cmap='gray')
                     ax.imshow(sp_up, cmap='hot', alpha=0.45, vmin=0, vmax=1)
                     if tumor_vol[:, :, zi].max() > 0:
@@ -326,6 +330,7 @@ def main(args):
                     # Col 1 (spatial only): T2W + spatial attention overlay
                     if sp_attn is not None:
                         sp_up = _upsample_spatial_attn(sp_attn[si], H_img, W_img)
+                        sp_up = sp_up * (gland_vol[:, :, si] > 0.05)  # clip to gland
                         axes_g[1].imshow(t2w_i, cmap='gray')
                         axes_g[1].imshow(sp_up, cmap='hot', alpha=0.45, vmin=0, vmax=1)
                         if tumor_i.max() > 0:

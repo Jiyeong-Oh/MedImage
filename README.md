@@ -195,9 +195,18 @@ Extends MIL-ABMIL by replacing global average pooling with an end-to-end **spati
 
 The 1×1 conv is the classification decision mechanism (not post-hoc): spatial gradients flow directly through the attention weights into the backbone. This produces two interpretable maps per patient — **which slices matter** (slice attention) and **where in each slice** (spatial attention overlay) — without any Grad-CAM approximation.
 
-Two runs:
-- `mil_spatial_fbal`: 1 GPU, batch_size=2, BalancedBatchSampler
-- `spatial_g2b4_fbal`: 2 GPUs (DataParallel), batch_size=4, BalancedBatchSampler
+**Gland-Masked variant (`spatial_gm_fbal`):** The spatial softmax is constrained within the prostate gland boundary. The gland channel (ch2, 224×224) is downsampled to 7×7 via average pooling and used as a binary mask — locations with < 5% gland coverage receive `-inf` before softmax, forcing attention inside the prostate. Slices entirely outside the gland (edge slices) fall back to uniform attention.
+
+```
+gland_7 = avg_pool(gland_ch, 7×7)          # [B*S, 1, 7, 7]
+sp_logit[gland_7 < 0.05] = -inf            # mask non-gland
+sp_attn = softmax(sp_logit, dim=spatial)   # attention inside gland only
+```
+
+Runs:
+- `mil_spatial_fbal`: 1 GPU, batch_size=2, BalancedBatchSampler (no gland mask)
+- `spatial_g2b4_fbal`: 2 GPUs (DataParallel), batch_size=4, BalancedBatchSampler (no gland mask)
+- `spatial_gm_fbal`: 4 GPUs, batch_size=8, BalancedBatchSampler, **gland-masked softmax**
 
 ---
 
@@ -208,6 +217,7 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
 | Method | Run | Val AUC | **Test AUC** | Youden thr | Sens@Y | Spec@Y | TP | FN |
 |--------|-----|--------:|------------:|-----------:|-------:|-------:|---:|---:|
 | weight_tiling | **wt_fbn_fbal** | 0.774 | **0.800** | 0.367 | 81.5% | 72.7% | 15 | 12 |
+| mil_spatial | **spatial_gm_fbal** | 0.788 | **0.780** | 0.864 | 85.2% | 60.8% | 23 | 4  |
 | channel_adapter | **ca_os5** | 0.700 | **0.762** | 0.007 | 63.0% | 72.7% | 10 | 17 |
 | mil_spatial | **mil_spatial_fbal** | 0.812 | **0.762** | 1.000 | 70.4% | 72.0% | 19 | 8  |
 | mil_abmil | **baseline** | 0.792 | **0.759** | 0.876 | 74.1% | 65.7% | 25 | 2  |
@@ -237,6 +247,7 @@ Test set: 170 patients (csPCa=27, ciPCa=143). Ranked by Test AUC.
 - **Youden threshold = 0.000** in several runs means the model predicts csPCa for nearly all patients — a sign of class imbalance instability rather than useful calibration.
 - **cs_oversample ×5** improves sensitivity (wt_os5: 70.4% vs wt_fbn: 37.0%) but hurts specificity — more csPCa examples per epoch increases recall at the cost of false positives.
 - **Spatial MIL** (`mil_spatial_fbal`, AUC 0.762) matches channel_adapter at the same test AUC with a higher Youden specificity (72.0% vs 72.7%) and produces interpretable per-slice spatial attention maps without Grad-CAM post-hoc approximation. The batch_size=4 variant (`spatial_g2b4_fbal`, AUC 0.751) showed higher sensitivity (81.5%, only 5 FN) but slightly lower AUC, consistent with the sensitivity-AUC tradeoff seen across methods.
+- **Gland-Masked Spatial MIL** (`spatial_gm_fbal`, AUC 0.780) constrains spatial attention to within the prostate gland boundary (masked softmax, gland ch2 → 7×7 pool). Outperforms unconstrained Spatial MIL by +0.018 AUC and achieves the highest sensitivity at the Youden threshold (85.2%, only 4 FN), suggesting that anatomically grounded attention both improves discrimination and reduces missed cancers.
 
 ---
 

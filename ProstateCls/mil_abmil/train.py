@@ -327,6 +327,9 @@ def main():
     p.add_argument('--output-dir',    type=str,   default='output/run')
     args = p.parse_args()
 
+    if args.spatial_attn:
+        args.add_gland_ch = True  # gland channel (ch2) required for spatial mask
+
     set_seed(args.seed)
     os.makedirs(args.output_dir, exist_ok=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
