@@ -37,9 +37,13 @@ Stratified split, `seed=42`. Patient-level splits (no slice leakage).
 
 ---
 
-## Input Representation — Depth-as-Channel
+## Input Representation
 
-All methods except MIL encode the 3D volume as a **96-channel 2D tensor**:
+Two distinct input strategies are used across methods:
+
+### A. Depth-as-Channel — Methods 1–5 (Weight Tiling · Channel Adapter · CNN Head · Mask Guided · Seg+Cls)
+
+The 3D volume is encoded as a **96-channel 2D tensor** and processed by a single 2D backbone:
 
 ```
 32 axial slices × 3 modalities (T2W, ADC, gland) = 96 channels
@@ -47,9 +51,23 @@ Channel order: [T2W₀, ADC₀, gland₀, T2W₁, ADC₁, gland₁, ..., T2W₃�
 Input shape: [B, 96, 224, 224]
 ```
 
-**Weight Tiling**: The pretrained MedViT first conv (3 ch → 64) is inflated to 96 ch → 64 by tiling the pretrained weights 32 times and dividing by 32. This preserves pretrained feature extractors while extending to multi-slice input. All other backbone weights are frozen from ImageNet pretraining (backbone LR = 1e-5).
+**Weight Tiling**: The pretrained MedViT first conv (3 ch → 64) is inflated to 96 ch → 64 by tiling the pretrained weights 32 times and dividing by 32. This preserves pretrained feature extractors while extending to multi-slice input. Backbone LR = 1e-5 to avoid BN drift.
 
-**Preprocessing per patient:**
+### B. Multiple Instance Learning — Methods 6–7 (MIL-ABMIL · Spatial MIL)
+
+Each axial slice is processed **independently** through a shared backbone, then aggregated:
+
+```
+32 slices per patient, each [B, nch, 224, 224]
+  nch = 2: [T2W×gland, ADC×gland]           (standard MIL runs)
+  nch = 3: [T2W×gland, ADC×gland, gland]    (spatial_gm runs — gland ch used for attention mask)
+Input shape per slice: [B, nch, 224, 224]  →  processed as bag of S=32 instances
+```
+
+No weight tiling needed — the backbone uses 2–3 channels matching its pretrained input.
+
+### Preprocessing (common to all methods)
+
 1. Resample T2W + ADC + gland to 0.5 mm/px in-plane
 2. Crop 80 mm FOV centered on gland centroid
 3. Resize to 224 × 224
@@ -79,12 +97,15 @@ With 15.8% positive rate, models tend to ignore csPCa. Four complementary strate
 All methods share MedViT_small as the feature extractor ([Nejati et al., 2023](https://arxiv.org/abs/2302.09462)) — a hierarchical CNN-Transformer hybrid pretrained on ImageNet.
 
 ```
-Input [B, 96, 224, 224]
+Depth-as-Channel input: [B, 96, 224, 224]
+MIL input (per slice):  [B, nch, 224, 224]  (nch = 2 or 3)
   ├─ Stem (stride 2+2)               →  [B,  64,  56, 56]
   ├─ Stage 1 — ECB ×3                →  [B,  96,  56, 56]   f1
   ├─ Stage 2 — ECB+LTB ×4, stride 2 →  [B, 256,  28, 28]   f2
   ├─ Stage 3 — ECB+LTB ×10, stride 2→  [B, 512,  14, 14]   f3
   └─ Stage 4 — ECB+LTB ×3, stride 2 →  [B, 1024,  7,  7]   f4
+     └─ GAP → [B, 1024]  (Depth-as-Channel methods)
+        or kept as [B, 1024, 7, 7]  (Spatial MIL — GAP suppressed)
 ```
 
 ECB = Efficient Conv Block · LTB = Local-Transformer Block (with MHCA attention)
